@@ -53,7 +53,7 @@
   "removalTitle": "Some setup was not removed",
   "removalLead": "You logged out, but these tools still hold Agent-Memory settings:",
   "mcpSwitch": "Turn on the agent-memory MCP",
-  "mcpOn": "Claude Code, Codex and omp agents opened in Paseo get the agent-memory MCP. A change applies when an agent opens.",
+  "mcpOn": "Claude Code, Codex and omp agents opened in Paseo get the agent-memory MCP. A change applies when an agent opens. Antigravity gets it from its own config file when the key is issued, and this switch does not change that.",
   "mcpOff": "The agent-memory MCP is off.",
   "mcpInvalid": "The agent-memory MCP is off because its saved setting cannot be read. Reset it to turn it on again.",
   "harness": {
@@ -67,6 +67,7 @@
     "partial": "Set up without the project hook",
     "failed": "Not set up"
   },
+  "harnessStateAgyPartial": "The hook is set up. The agent-memory MCP entry was not added to the agy config.",
   "harnessErrors": {
     "settings_invalid": "The settings file is not valid JSON, so it was left as it is.",
     "codex_profile": "The Codex config selects a profile, so it was left as it is.",

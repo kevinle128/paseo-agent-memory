@@ -1,5 +1,6 @@
 import { credentialMatchesOrigin } from "../shared/view";
-import { MCP_PATH, MCP_PROVIDERS, MCP_SERVER_NAME } from "../shared/constants";
+import { MCP_PROVIDERS, MCP_SERVER_NAME } from "../shared/constants";
+import { mcpHeaders, mcpUrl } from "../shared/mcp-entry";
 import type { CredentialFile } from "./store";
 
 export interface McpHttpServer {
@@ -29,11 +30,8 @@ export function mcpServersFor(input: McpAttachInput): Record<string, McpHttpServ
   return {
     [MCP_SERVER_NAME]: {
       type: "http",
-      url: new URL(MCP_PATH, credential.origin).toString(),
-      headers: {
-        "x-tdai-service-id": credential.instanceId,
-        "x-tdai-user-key": credential.key,
-      },
+      url: mcpUrl(credential.origin),
+      headers: mcpHeaders(credential.instanceId, credential.key),
     },
   };
 }

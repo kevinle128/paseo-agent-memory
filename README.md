@@ -46,7 +46,7 @@ moment. It gives the same result as the Agent-Memory Guide page and `setup/hooks
 | Claude Code | `env.ANTHROPIC_BASE_URL` and `env.ANTHROPIC_AUTH_TOKEN` in `~/.claude/settings.json` | installer `--client claude-code` |
 | Codex | `model_provider = "team-proxy"` and `[model_providers.team-proxy]` in `$CODEX_HOME/config.toml` (`experimental_bearer_token`) | installer `--client codex` |
 | omp | a marked provider region in `models.yml` (providers built from `<proxy>/omp/<space>/v1/models`) | installer `--client omp` |
-| Antigravity (agy) | written by the installer (`~/.agent-memory/antigravity.url` and the shell profile block) | installer `--client antigravity` |
+| Antigravity (agy) | written by the installer (`~/.agent-memory/antigravity.url` and the shell profile block); the plugin also adds the `agent-memory` MCP server to `~/.gemini/config/mcp_config.json` (see below) | installer `--client antigravity` |
 
 - **Proxy address.** Read from the Panel: `GET <panel>/api/v1/meta/instances` (public) and the
   `proxy_endpoint` of the configured instance. If the Panel gives none, nothing is set up.
@@ -73,8 +73,24 @@ adds it to every Claude Code, Codex and omp agent that Paseo opens, under the na
 It lets the agent ask who you are in Agent-Memory, how Agent-Memory works, and questions about the
 wikis and code graphs of your teams. It shows nothing that the Panel hides from you.
 
-- **Providers.** `claude`, `codex` and `omp`, the clients Agent-Memory supports. Other Paseo providers
-  get no entry.
+- **Providers.** `claude`, `codex` and `omp` get the entry from the plugin each time an agent opens.
+  Other Paseo providers get no entry, except Antigravity (below).
+- **Antigravity.** The Paseo `antigravity` provider ignores MCP servers that a plugin injects when an
+  agent opens, and `agy` takes MCP servers only from its own config files. So the plugin does not list
+  `antigravity` in the open hook. Instead, when it sets up `agy` for a new key, it writes the `agent-memory`
+  server (`serverUrl` plus the two headers, the layout of `agy mcp add --header ... agent-memory <url>`)
+  into `~/.gemini/config/mcp_config.json`, after a backup, and keeps every other entry and key.
+  - This entry applies to every `agy` launch, also outside Paseo, like the Claude Code and Codex entries.
+  - The plugin's MCP switch below does not control it.
+  - The file now holds the key, as `~/.agent-memory/antigravity.url` does. A file that was open to the
+    group or others is changed to mode 0600.
+  - At log out the plugin removes exactly that entry, when it still holds the key. An entry you changed
+    is kept and shown on the screen. A file that the plugin created is deleted only when nothing else is
+    left in it; a file that existed before always stays. A failed MCP removal does not stop the removal of
+    the URL file and the hook; the screen then reports the failure.
+  - An `agent-memory` entry that points at another host or path is yours: the plugin leaves it alone and
+    the tool shows as partly set up. When the plugin updates its own entry, it keeps other headers, other
+    fields and `disabled: true`.
 - **Switch.** Settings > Plugins > Agent-Memory > Account shows "Turn on the agent-memory MCP". It is
   on until you save a different value. A change applies the next time an agent opens, so reopen the
   agent after you change it. If the saved setting is not valid, the MCP is off, the switch shows Off,

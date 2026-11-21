@@ -63,6 +63,10 @@ const HarnessFile = z.object({
       state: HarnessState,
       error: HarnessErrorCode.optional(),
       route: z.string(),
+      // Antigravity only. `mcpWritten`: the plugin put its entry in mcp_config.json. `mcpCreated`: the file
+      // did not exist before, so the removal may delete it when nothing else is left in it.
+      mcpWritten: z.boolean().optional(),
+      mcpCreated: z.boolean().optional(),
     }),
   ),
 });

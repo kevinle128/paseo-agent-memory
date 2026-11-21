@@ -82,6 +82,19 @@ wikis and code graphs of your teams. It shows nothing that the Panel hides from 
   into `~/.gemini/config/mcp_config.json`, after a backup, and keeps every other entry and key.
   - This entry applies to every `agy` launch, also outside Paseo, like the Claude Code and Codex entries.
   - The plugin's MCP switch below does not control it.
+  - **Gateway URL at open.** The Paseo daemon reads `AGY_LLM_GATEWAY_URL` from the shell profile once, when
+    it starts, so after a log out and a new login a Paseo `agy` agent would still use the old, expired key
+    and the gateway would list only a few models. So the open hook sets `AGY_LLM_GATEWAY_URL` in the
+    environment of every `antigravity` agent to `<proxy>/antigravity/<instance>/<key>`, the content of
+    `~/.agent-memory/antigravity.url`, with the key of the login now. The MCP switch does not control this
+    either, because it is part of the `agy` setup. The value is set only while you are logged in, the key
+    has not expired, the saved address is the address of the login, and the plugin record says `agy` was
+    set up for this key (state "configured", or "partial" after only the MCP entry failed). Otherwise the
+    environment stays as it is. No other provider is changed, the hook makes no network call, and the value
+    is never logged. A non-empty `AGY_LLM_GATEWAY_URL` that you set in Paseo settings or for one agent
+    (for example a URL without memory) wins: the plugin leaves it as it is. An agent that was opened
+    before the new login keeps the old key until you reopen it. The Paseo model picker is read with the
+    daemon environment, so it can show the model list of the old key until the daemon restarts.
   - The file now holds the key, as `~/.agent-memory/antigravity.url` does. A file that was open to the
     group or others is changed to mode 0600.
   - At log out the plugin removes exactly that entry, when it still holds the key. An entry you changed
@@ -107,7 +120,7 @@ wikis and code graphs of your teams. It shows nothing that the Panel hides from 
 
 ## Out of scope
 
-- Injecting env or instructions into agents at open time.
+- Injecting instructions, or env for any provider other than `antigravity`, into agents at open time.
 - Adding the MCP to agents that you start outside Paseo.
 - Skills, Command Center and sidebar items, gallery publication, a language picker.
 - Any change to the Paseo fork or to Agent-Memory.

@@ -11,6 +11,7 @@ import { createLoginMachine, type MachineSettings } from "./server/login-machine
 import { createHarnessSetup } from "./server/harness-setup";
 import { detectHarnesses, resolvePaths } from "./server/harness-paths";
 import { createInstallerRunner } from "./server/hooks-installer";
+import { chainOpenSteps, createAgyGatewayEnvHook } from "./server/agy-gateway-env";
 import { createMcpAttachHook } from "./server/mcp-attach";
 import { createStore } from "./server/store";
 
@@ -81,17 +82,24 @@ export default function contribute(server: PluginServerContext) {
     if (await initError) throw new Error("Agent-Memory plugin could not start; see plugin logs");
   };
 
-  // The hook reads local files only. The switch is read on every open, so a change applies to the next agent.
-  server.addHook(
-    "agent.open.before",
-    createMcpAttachHook({
-      readEnabled: async () => mcpEnabled(await mcpSettings.read()),
-      readSettingsOrigin: async () => toMachineSettings(await settings.read()).origin,
-      readCredential: () => store.readCredential(),
-      now: Date.now,
-      log: (message) => console.error(message),
-    }),
-  );
+  // The hooks read local files only. The MCP switch is read on every open, so a change applies to the next agent.
+  const attachMcp = createMcpAttachHook({
+    readEnabled: async () => mcpEnabled(await mcpSettings.read()),
+    readSettingsOrigin: async () => toMachineSettings(await settings.read()).origin,
+    readCredential: () => store.readCredential(),
+    now: Date.now,
+    log: (message) => console.error(message),
+  });
+  // Not behind the MCP switch: it is part of the Antigravity setup, which is not.
+  const injectAgyGateway = createAgyGatewayEnvHook({
+    readCredential: () => store.readCredential(),
+    readSettingsOrigin: async () => toMachineSettings(await settings.read()).origin,
+    readHarness: () => store.readHarness(),
+    now: Date.now,
+    log: (message) => console.error(message),
+  });
+  // One handler, so the second step sees the result of the first.
+  server.addHook("agent.open.before", chainOpenSteps(attachMcp, injectAgyGateway));
 
   server.handle(statusRpc, async () => {
     await ready();

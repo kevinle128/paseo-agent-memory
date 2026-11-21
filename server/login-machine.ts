@@ -5,7 +5,7 @@ import {
   DEVICE_SLOW_DOWN_STEP_S,
 } from "../shared/constants";
 import type { AccountStatus, ErrorCode, SignedOutReason } from "../shared/status";
-import { isRenewDue } from "../shared/view";
+import { credentialMatchesOrigin, isRenewDue } from "../shared/view";
 import { ApiError, type ApprovedGrant, type DeviceApi } from "./device-api";
 import type { HarnessSetup } from "./harness-setup";
 import type { PendingFile, Store } from "./store";
@@ -375,7 +375,7 @@ export function createLoginMachine(deps: MachineDeps) {
         ...error,
       };
     }
-    if (credential && settings.origin === credential.origin) {
+    if (credential && credentialMatchesOrigin(settings.origin, credential.origin)) {
       const expiresMs = Date.parse(credential.expiresAt);
       const account = {
         username: credential.account.username,

@@ -66,9 +66,33 @@ moment. It gives the same result as the Agent-Memory Guide page and `setup/hooks
   shown on the screen. Backups are not restored and are not deleted. If the installer cannot be
   reached at log out, the hook stays and the screen says so.
 
+## The agent-memory MCP
+
+The Panel serves a read-only MCP server at `<panel>/api/v1/mcp`. While you are logged in, the plugin
+adds it to every Claude Code, Codex and omp agent that Paseo opens, under the name `agent-memory`.
+It lets the agent ask who you are in Agent-Memory, how Agent-Memory works, and questions about the
+wikis and code graphs of your teams. It shows nothing that the Panel hides from you.
+
+- **Providers.** `claude`, `codex` and `omp`, the clients Agent-Memory supports. Other Paseo providers
+  get no entry.
+- **Switch.** Settings > Plugins > Agent-Memory > Account shows "Turn on the agent-memory MCP". It is
+  on until you save a different value. A change applies the next time an agent opens, so reopen the
+  agent after you change it. If the saved setting is not valid, the MCP is off, the switch shows Off,
+  and a Reset action restores the default.
+- **No entry without a valid login.** When you are logged out, the key has expired, or the saved
+  address no longer matches the address you logged in to (the screen shows "server changed"), agents
+  open without the MCP. The hook reads local files only, so an agent still opens when the Panel is down.
+- **Key.** The plugin sends the key as the `x-tdai-user-key` header. Paseo keeps the entry in memory
+  for the launch and does not save it in the agent record. The Claude SDK passes the MCP config inline
+  to the Claude process, so the key is visible in that process's arguments on your own machine while
+  the agent runs. omp never receives it.
+- **Name.** Do not save your own MCP server named `agent-memory` in an agent. The names would collide
+  and the agent would not open.
+
 ## Out of scope
 
-- Injecting env, instructions or the agent-memory MCP into agents at open time (next step).
+- Injecting env or instructions into agents at open time.
+- Adding the MCP to agents that you start outside Paseo.
 - Skills, Command Center and sidebar items, gallery publication, a language picker.
 - Any change to the Paseo fork or to Agent-Memory.
 

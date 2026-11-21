@@ -52,6 +52,10 @@
   "removalRunning": "Đang gỡ cấu hình Agent-Memory khỏi các công cụ...",
   "removalTitle": "Một số cấu hình chưa được gỡ",
   "removalLead": "Bạn đã đăng xuất, nhưng các công cụ sau vẫn còn cấu hình Agent-Memory:",
+  "mcpSwitch": "Bật MCP agent-memory",
+  "mcpOn": "Các agent Claude Code, Codex và omp mở trong Paseo được gắn MCP agent-memory. Thay đổi có hiệu lực khi một agent được mở.",
+  "mcpOff": "MCP agent-memory đang tắt.",
+  "mcpInvalid": "MCP agent-memory đang tắt vì không đọc được cài đặt đã lưu. Hãy đặt lại để bật lại.",
   "harness": {
     "claude": "Claude Code",
     "codex": "Codex",

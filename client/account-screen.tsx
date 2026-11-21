@@ -15,13 +15,14 @@ import {
   SettingsInput,
   SettingsRow,
   SettingsSection,
+  SettingsSwitch,
   copyText,
   useToast,
 } from "@getpaseo/plugin/client/ui";
 import { loginRpc, logoutRpc, pollRpc, statusRpc } from "../shared/rpc";
-import { connection } from "../shared/settings";
+import { connection, mcp } from "../shared/settings";
 import type { AccountStatus } from "../shared/status";
-import { refetchIntervalFor } from "../shared/view";
+import { mcpEnabled, refetchIntervalFor } from "../shared/view";
 import { messages } from "./messages";
 
 const STATUS_KEY = ["account-status"];
@@ -358,6 +359,7 @@ function ConnectedCard({
       ) : status.lastError ? (
         <Text style={styles.error}>{t(`errors.${status.lastError}`)}</Text>
       ) : null}
+      <McpSwitch styles={styles} />
       {status.setup ? <SetupSummary setup={status.setup} styles={styles} /> : null}
       <TextLink label={t("logout")} onPress={logout} styles={styles} />
     </View>
@@ -420,6 +422,36 @@ function ConnectionForm({
         />
       </SettingsCard>
     </SettingsSection>
+  );
+}
+
+function McpSwitch({ styles }: { styles: Styles }) {
+  const { t } = useTranslation(messages);
+  const settings = useSettings(mcp);
+  const ready = settings.status === "ready";
+  // A document that is not ready counts as off: the server attaches nothing for it.
+  const enabled = mcpEnabled(settings);
+  const toggle = useCallback(
+    (value: boolean) => {
+      if (settings.status === "ready") void settings.save({ enabled: value }, settings.revision);
+    },
+    [settings],
+  );
+  if (settings.status === "loading") return null;
+  return (
+    <View style={styles.section}>
+      <SettingsSwitch
+        label={t("mcpSwitch")}
+        value={enabled}
+        onValueChange={toggle}
+        disabled={!ready || settings.saving}
+        error={ready ? settings.saveError : settings.error}
+      />
+      <Text style={styles.muted}>{t(ready ? (enabled ? "mcpOn" : "mcpOff") : "mcpInvalid")}</Text>
+      {settings.status === "invalid" ? (
+        <SettingsAction label={t("restoreDefaults")} actionLabel={t("reset")} onPress={settings.reset} />
+      ) : null}
+    </View>
   );
 }
 

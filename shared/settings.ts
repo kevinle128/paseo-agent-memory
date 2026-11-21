@@ -25,3 +25,13 @@ export const connection = defineSettings({
       .default(DEFAULT_INSTANCE_ID),
   }),
 });
+
+// A separate document keeps this switch apart from the connection form's draft and Save button.
+export const mcp = defineSettings({
+  id: "mcp",
+  scope: "host",
+  version: 1,
+  schema: z.object({
+    enabled: z.boolean().default(true),
+  }),
+});

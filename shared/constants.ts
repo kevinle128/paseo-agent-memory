@@ -10,3 +10,8 @@ export const DEVICE_MAX_INTERVAL_S = 60;
 export const CLAIM_MIN_INTERVAL_S = 60;
 export const CLAIM_MAX_BACKOFF_S = 15 * 60;
 export const DEFAULT_INSTANCE_ID = "default";
+// The Panel serves one read-only MCP server; Paseo adds it to agents of the providers below.
+export const MCP_SERVER_NAME = "agent-memory";
+export const MCP_PATH = "/api/v1/mcp";
+// The clients Agent-Memory supports. Other Paseo providers get no MCP entry.
+export const MCP_PROVIDERS = ["claude", "codex", "omp"] as const;

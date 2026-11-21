@@ -3,13 +3,15 @@ import type { PluginServerContext, PluginSettingsState } from "@getpaseo/plugin/
 import { parseBaseUrl } from "./shared/base-url";
 import { PLACEHOLDER_ORIGIN } from "./shared/constants";
 import { logoutRpc, loginRpc, pollRpc, statusRpc } from "./shared/rpc";
-import { connection } from "./shared/settings";
+import { connection, mcp } from "./shared/settings";
+import { mcpEnabled } from "./shared/view";
 import { ensureDataDir, resolveDataDir } from "./server/data-dir";
 import { createDeviceApi } from "./server/device-api";
 import { createLoginMachine, type MachineSettings } from "./server/login-machine";
 import { createHarnessSetup } from "./server/harness-setup";
 import { detectHarnesses, resolvePaths } from "./server/harness-paths";
 import { createInstallerRunner } from "./server/hooks-installer";
+import { createMcpAttachHook } from "./server/mcp-attach";
 import { createStore } from "./server/store";
 
 type SettingsRead = PluginSettingsState<typeof connection.schema>;
@@ -34,6 +36,7 @@ function toMachineSettings(state: SettingsRead): MachineSettings {
 
 export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(connection);
+  const mcpSettings = server.registerSettings(mcp);
   const lifetime = new AbortController();
   const dir = resolveDataDir();
   console.log(`data dir: ${dir}`);
@@ -77,6 +80,18 @@ export default function contribute(server: PluginServerContext) {
   const ready = async () => {
     if (await initError) throw new Error("Agent-Memory plugin could not start; see plugin logs");
   };
+
+  // The hook reads local files only. The switch is read on every open, so a change applies to the next agent.
+  server.addHook(
+    "agent.open.before",
+    createMcpAttachHook({
+      readEnabled: async () => mcpEnabled(await mcpSettings.read()),
+      readSettingsOrigin: async () => toMachineSettings(await settings.read()).origin,
+      readCredential: () => store.readCredential(),
+      now: Date.now,
+      log: (message) => console.error(message),
+    }),
+  );
 
   server.handle(statusRpc, async () => {
     await ready();

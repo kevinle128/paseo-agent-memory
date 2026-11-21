@@ -1,6 +1,18 @@
 import { RENEW_WINDOW_MS } from "./constants";
 import type { AccountStatus } from "./status";
 
+/** A saved login counts only for the server that the settings point at now. */
+export function credentialMatchesOrigin(settingsOrigin: string | null, credentialOrigin: string): boolean {
+  return settingsOrigin !== null && settingsOrigin === credentialOrigin;
+}
+
+/** The switch value of the `mcp` settings document. Only a document that is ready can turn the MCP on. */
+export function mcpEnabled(
+  state: { status: string; values?: { enabled: boolean } } | undefined,
+): boolean {
+  return state?.status === "ready" && state.values?.enabled === true;
+}
+
 export type ScreenName = "login" | "waiting" | "pending" | "connected";
 
 export function screenFor(status: AccountStatus): ScreenName {

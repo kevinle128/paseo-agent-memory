@@ -52,6 +52,10 @@
   "removalRunning": "Removing the Agent-Memory setup from your tools...",
   "removalTitle": "Some setup was not removed",
   "removalLead": "You logged out, but these tools still hold Agent-Memory settings:",
+  "mcpSwitch": "Turn on the agent-memory MCP",
+  "mcpOn": "Claude Code, Codex and omp agents opened in Paseo get the agent-memory MCP. A change applies when an agent opens.",
+  "mcpOff": "The agent-memory MCP is off.",
+  "mcpInvalid": "The agent-memory MCP is off because its saved setting cannot be read. Reset it to turn it on again.",
   "harness": {
     "claude": "Claude Code",
     "codex": "Codex",

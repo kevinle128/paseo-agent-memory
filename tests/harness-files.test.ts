@@ -4,6 +4,10 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   SetupFailure,
+  agyMcpApply,
+  agyMcpRemove,
+  applyAgyMcp,
+  removeAgyMcp,
   applyClaude,
   applyCodex,
   applyOmp,
@@ -447,5 +451,93 @@ describe("atomic writes and backups", () => {
     await applyClaude(file, ROUTE, KEY, NOW);
     expect((await stat(file)).mode & 0o777).toBe(0o600);
     expect(await readdir(join(dir, "new"))).toEqual(["settings.json"]);
+  });
+});
+
+describe("antigravity mcp config", () => {
+  const URL_MCP = "https://panel.example.net:8126/api/v1/mcp";
+  const entry = { disabled: false, serverUrl: URL_MCP, headers: { "x-tdai-service-id": "default", "x-tdai-user-key": KEY } };
+
+  it("adds the server with both headers and keeps other servers and keys", () => {
+    const before = JSON.stringify({ theme: "dark", mcpServers: { fs: { disabled: false, serverUrl: "https://fs.example.net/mcp" } } });
+    const out = JSON.parse(agyMcpApply(before, URL_MCP, "default", KEY));
+    expect(out.theme).toBe("dark");
+    expect(out.mcpServers.fs.serverUrl).toBe("https://fs.example.net/mcp");
+    expect(out.mcpServers["agent-memory"]).toEqual(entry);
+  });
+
+  it("removes exactly its entry, and reports an empty file for deletion", () => {
+    const withOthers = agyMcpApply(JSON.stringify({ mcpServers: { fs: { serverUrl: "https://fs.example.net/mcp" } } }), URL_MCP, "default", KEY);
+    const out = agyMcpRemove(withOthers, DIGEST, true);
+    expect(out.result).toBe("removed");
+    expect(JSON.parse(out.text as string)).toEqual({ mcpServers: { fs: { serverUrl: "https://fs.example.net/mcp" } } });
+    expect(agyMcpRemove(agyMcpApply(null, URL_MCP, "default", KEY), DIGEST, true)).toEqual({ text: null, result: "removed" });
+  });
+
+  it("keeps an entry with another key and reports it", () => {
+    const text = agyMcpApply(null, URL_MCP, "default", "someone-elses-key-1");
+    expect(agyMcpRemove(text, DIGEST, true)).toEqual({ text, result: "changed" });
+  });
+
+  it("does not replace an agent-memory entry that is not an Agent-Memory MCP address", () => {
+    const text = JSON.stringify({ mcpServers: { "agent-memory": { serverUrl: "https://own.example.net/other" } } });
+    expect(() => agyMcpApply(text, URL_MCP, "default", KEY)).toThrow(SetupFailure);
+  });
+
+  it("treats an agent-memory entry on another host as the user's own", () => {
+    const text = JSON.stringify({ mcpServers: { "agent-memory": { serverUrl: "https://other.example.net/api/v1/mcp" } } });
+    expect(() => agyMcpApply(text, URL_MCP, "default", KEY)).toThrow(SetupFailure);
+  });
+
+  it("keeps the fields of its own entry when it updates it, including disabled: true", () => {
+    const text = JSON.stringify({
+      mcpServers: {
+        "agent-memory": { disabled: true, timeout: 30, serverUrl: URL_MCP, headers: { "x-extra": "1", "x-tdai-user-key": "old-key-0001" } },
+      },
+    });
+    const out = JSON.parse(agyMcpApply(text, URL_MCP, "default", KEY)).mcpServers["agent-memory"];
+    expect(out).toEqual({
+      disabled: true,
+      timeout: 30,
+      serverUrl: URL_MCP,
+      headers: { "x-extra": "1", "x-tdai-service-id": "default", "x-tdai-user-key": KEY },
+    });
+  });
+
+  it("never deletes a file that existed before, even when the removal leaves it empty", () => {
+    for (const before of ["{}", '{"mcpServers":{}}']) {
+      const out = agyMcpRemove(agyMcpApply(before, URL_MCP, "default", KEY), DIGEST, false);
+      expect(out.result).toBe("removed");
+      expect(out.text).not.toBeNull();
+      expect(JSON.parse(out.text as string).mcpServers ?? {}).toEqual({});
+    }
+  });
+
+  it("closes a file that was open to the group to the owner only, also when the content is unchanged", async () => {
+    const file = join(dir, "open.json");
+    await writeFile(file, "{}");
+    await chmod(file, 0o644);
+    await applyAgyMcp(file, URL_MCP, "default", KEY, NOW);
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    await chmod(file, 0o644);
+    await applyAgyMcp(file, URL_MCP, "default", KEY, NOW);
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+  });
+
+  it("refuses invalid files without changing them", async () => {
+    const file = join(dir, "mcp_config.json");
+    await writeFile(file, "{broken");
+    await expect(applyAgyMcp(file, URL_MCP, "default", KEY, NOW)).rejects.toMatchObject({ code: "settings_invalid" });
+    expect(await readFile(file, "utf8")).toBe("{broken");
+    expect(() => agyMcpApply('{"mcpServers": []}', URL_MCP, "default", KEY)).toThrow(SetupFailure);
+  });
+
+  it("round trips through a file: 0600 for a new file, no backup left after removal, file gone", async () => {
+    const file = join(dir, "config", "mcp_config.json");
+    await applyAgyMcp(file, URL_MCP, "default", KEY, NOW);
+    expect((await stat(file)).mode & 0o777).toBe(0o600);
+    expect(await removeAgyMcp(file, DIGEST, true, NOW)).toBe("removed");
+    await expect(stat(file)).rejects.toThrow();
+    expect(await removeAgyMcp(file, DIGEST, true, NOW)).toBe("absent");
   });
 });

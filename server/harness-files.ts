@@ -1,7 +1,9 @@
 import { createHash, randomBytes } from "node:crypto";
 import { constants } from "node:fs";
-import { copyFile, mkdir, open, readFile, readlink, rename, rm, stat } from "node:fs/promises";
+import { chmod, copyFile, mkdir, open, readFile, readlink, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
+import { MCP_PATH, MCP_SERVER_NAME } from "../shared/constants";
+import { MCP_KEY_HEADER, mcpHeaders } from "../shared/mcp-entry";
 import type { HarnessErrorCode } from "../shared/harness";
 
 /** A failure with a fixed code. The message never carries file content, because a file holds the key. */
@@ -77,7 +79,7 @@ async function resolveTarget(file: string): Promise<string> {
  * A symlink is resolved first, because a rename over the link would replace the link itself. The file keeps
  * its mode; a new file gets 0600 because it holds a key.
  */
-async function writeAtomic(file: string, content: string): Promise<void> {
+async function writeAtomic(file: string, content: string, ownerOnly = false): Promise<void> {
   const target = await resolveTarget(file);
   let mode = 0o600;
   try {
@@ -85,6 +87,7 @@ async function writeAtomic(file: string, content: string): Promise<void> {
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
+  if (ownerOnly) mode = 0o600;
   const dir = dirname(target);
   await mkdir(dir, { recursive: true });
   const temp = join(dir, `.${basename(target)}.agent-memory-tmp-${process.pid}-${randomBytes(4).toString("hex")}`);
@@ -123,12 +126,13 @@ async function writeChanged(
   after: string | null,
   now: number,
   removal = false,
+  ownerOnly = false,
 ) {
   if (before === after) return;
   const backup = before !== null ? await backupFile(file, now) : null;
   try {
     if (after === null) await rm(await resolveTarget(file), { force: true });
-    else await writeAtomic(file, after);
+    else await writeAtomic(file, after, ownerOnly);
   } catch (error) {
     // The backup holds the key, and a failed removal gives it no use.
     if (removal && backup) await rm(backup, { force: true }).catch(() => undefined);
@@ -574,5 +578,110 @@ export async function checkAgyUrl(
     const value = text.trim();
     const prefix = `${route}/`;
     return value.startsWith(prefix) && isKey(value.slice(prefix.length), digest) ? "ours" : "changed";
+  });
+}
+
+// ---------------------------------------------------------------------------------------------------
+// Antigravity: the MCP server in the global mcp_config.json (the file `agy mcp add` writes)
+
+function parseMcpConfig(text: string | null): { config: Record<string, unknown>; servers: Record<string, unknown> } {
+  const config = text === null || text.trim() === "" ? {} : parseSettings(text);
+  const servers = config.mcpServers ?? {};
+  if (!servers || typeof servers !== "object" || Array.isArray(servers)) {
+    throw new SetupFailure("settings_invalid");
+  }
+  return { config, servers: servers as Record<string, unknown> };
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  !!value && typeof value === "object" && !Array.isArray(value);
+
+/** The address of an entry when it is a URL; `null` for anything else. */
+function entryUrl(entry: unknown): URL | null {
+  if (!isRecord(entry) || typeof entry.serverUrl !== "string") return null;
+  try {
+    return new URL(entry.serverUrl);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Adds the `agent-memory` server with its two headers and keeps every other entry and key. An entry of
+ * that name is replaced only when it points at the MCP path of the same Panel; any other entry belongs to
+ * the user and is never touched. When the plugin updates its own entry it keeps the fields it does not
+ * write: other headers, unknown fields and `disabled`.
+ */
+export function agyMcpApply(text: string | null, url: string, instanceId: string, key: string): string {
+  const { config, servers } = parseMcpConfig(text);
+  const existing = servers[MCP_SERVER_NAME];
+  let previous: Record<string, unknown> = {};
+  if (existing !== undefined) {
+    const found = entryUrl(existing);
+    if (!found || found.pathname !== MCP_PATH || found.origin !== new URL(url).origin) {
+      throw new SetupFailure("own_provider");
+    }
+    previous = existing as Record<string, unknown>;
+  }
+  const oldHeaders = isRecord(previous.headers) ? previous.headers : {};
+  config.mcpServers = {
+    ...servers,
+    [MCP_SERVER_NAME]: {
+      ...previous,
+      disabled: typeof previous.disabled === "boolean" ? previous.disabled : false,
+      headers: { ...oldHeaders, ...mcpHeaders(instanceId, key) },
+      serverUrl: url,
+    },
+  };
+  return `${JSON.stringify(config, null, 2)}\n`;
+}
+
+/**
+ * Removes only the entry that carries this key. A file that the plugin created is reported for deletion
+ * (`text: null`) once nothing else is left in it; a file that existed before always stays.
+ */
+export function agyMcpRemove(
+  text: string,
+  digest: string,
+  created: boolean,
+): { text: string | null; result: Removal } {
+  const { config, servers } = parseMcpConfig(text);
+  const entry = servers[MCP_SERVER_NAME];
+  if (entry === undefined) return { text, result: "absent" };
+  const found = entryUrl(entry);
+  const headers = isRecord(entry) ? entry.headers : undefined;
+  if (!found || found.pathname !== MCP_PATH || !isRecord(headers) || !isKey(headers[MCP_KEY_HEADER], digest)) {
+    return { text, result: "changed" };
+  }
+  delete servers[MCP_SERVER_NAME];
+  config.mcpServers = servers;
+  if (created && Object.keys(servers).length === 0) {
+    delete config.mcpServers;
+    if (Object.keys(config).length === 0) return { text: null, result: "removed" };
+  }
+  return { text: `${JSON.stringify(config, null, 2)}\n`, result: "removed" };
+}
+
+/** The file holds the key, so a file that was open to the group or others is closed to the owner only. */
+export async function applyAgyMcp(file: string, url: string, instanceId: string, key: string, now: number) {
+  await guarded(async () => {
+    const before = await readIfExists(file);
+    const after = agyMcpApply(before, url, instanceId, key);
+    if (before === after) {
+      const target = await resolveTarget(file);
+      if (((await stat(target)).mode & 0o777) !== 0o600) await chmod(target, 0o600);
+      return;
+    }
+    await writeChanged(file, before, after, now, false, true);
+  });
+}
+
+export async function removeAgyMcp(file: string, digest: string, created: boolean, now: number): Promise<Removal> {
+  return guarded(async () => {
+    const before = await readIfExists(file);
+    if (before === null) return "absent";
+    const out = agyMcpRemove(before, digest, created);
+    await writeChanged(file, before, out.text, now, true);
+    return out.result;
   });
 }

@@ -53,7 +53,7 @@
   "removalTitle": "Một số cấu hình chưa được gỡ",
   "removalLead": "Bạn đã đăng xuất, nhưng các công cụ sau vẫn còn cấu hình Agent-Memory:",
   "mcpSwitch": "Bật MCP agent-memory",
-  "mcpOn": "Các agent Claude Code, Codex và omp mở trong Paseo được gắn MCP agent-memory. Thay đổi có hiệu lực khi một agent được mở.",
+  "mcpOn": "Các agent Claude Code, Codex và omp mở trong Paseo được gắn MCP agent-memory. Thay đổi có hiệu lực khi một agent được mở. Antigravity nhận MCP từ tệp cấu hình riêng của nó khi khóa được cấp, và công tắc này không đổi điều đó.",
   "mcpOff": "MCP agent-memory đang tắt.",
   "mcpInvalid": "MCP agent-memory đang tắt vì không đọc được cài đặt đã lưu. Hãy đặt lại để bật lại.",
   "harness": {
@@ -67,6 +67,7 @@
     "partial": "Đã cấu hình, thiếu hook dự án",
     "failed": "Chưa cấu hình"
   },
+  "harnessStateAgyPartial": "Đã cấu hình hook. Chưa thêm mục MCP agent-memory vào cấu hình agy.",
   "harnessErrors": {
     "settings_invalid": "Tệp cài đặt không phải JSON hợp lệ nên được giữ nguyên.",
     "codex_profile": "Cấu hình Codex chọn một profile nên được giữ nguyên.",

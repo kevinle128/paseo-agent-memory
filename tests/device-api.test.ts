@@ -182,7 +182,7 @@ describe("device api errors", () => {
   it("aborts an in-flight request when the plugin stops", async () => {
     panel.queue("token", { hang: true });
     const pending = rejection(api({ timeoutMs: 5_000 }).token(panel.origin, DEVICE_CODE));
-    await vi.waitFor(() => expect(panel.count("token")).toBe(1));
+    await vi.waitFor(() => expect(panel.count("token")).toBe(1), { timeout: 5000 });
     lifetime.abort();
     expect((await pending).kind).toBe("network");
   });

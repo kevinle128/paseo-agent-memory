@@ -2,6 +2,7 @@ import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 import { HTTP_TIMEOUT_MS } from "../shared/constants";
+import { mcpUrl } from "../shared/mcp-entry";
 import {
   INSTALLER_CLIENT,
   type HarnessErrorCode,
@@ -11,11 +12,13 @@ import {
 } from "../shared/harness";
 import {
   SetupFailure,
+  applyAgyMcp,
   applyClaude,
   applyCodex,
   applyOmp,
   checkAgyUrl,
   keyDigest,
+  removeAgyMcp,
   removeClaude,
   removeCodex,
   removeOmp,
@@ -23,6 +26,7 @@ import {
   type Removal,
 } from "./harness-files";
 import {
+  agyMcpFile,
   agyUrlFile,
   claudeSettingsFile,
   codexConfigFile,
@@ -176,7 +180,7 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
 
   async function configureOne(
     id: HarnessId,
-    ctx: { proxyOrigin: string; instanceId: string; key: string },
+    ctx: { proxyOrigin: string; panelOrigin: string; instanceId: string; key: string; agyMcpCreated: boolean },
     signal: AbortSignal,
     commit: (entry: HarnessFile["harnesses"][number]) => Promise<void>,
   ): Promise<HarnessFile["harnesses"][number]> {
@@ -203,9 +207,29 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
       console.error(`harness ${id} not configured (${code})`);
       return { id, state: "failed", error: code, route };
     }
-    // The provider is on disk now, so it is recorded before the installer runs: a log out during the
-    // installer, or a crash, must still find it. Antigravity has no provider step.
-    if (id !== "agy") await commit({ id, state: "partial", route });
+    // Antigravity has no provider step; its MCP entry is the only file written before the installer.
+    // It is recorded before it is written, so a crash or a log out never leaves it without a record.
+    // A failed MCP step leaves the client usable, so it only downgrades the result to partial.
+    let mcpError: HarnessErrorCode | undefined;
+    let mcp: { mcpWritten: boolean; mcpCreated: boolean } | undefined;
+    if (id === "agy") {
+      const file = agyMcpFile(deps.paths);
+      const existed = await stat(file).then(() => true, (error: NodeJS.ErrnoException) => error.code !== "ENOENT");
+      // A setup for a new key finds the file an earlier setup created, which stays the plugin's to delete.
+      mcp = { mcpWritten: true, mcpCreated: !existed || ctx.agyMcpCreated };
+      await commit({ id, state: "partial", route, ...mcp });
+      try {
+        await applyAgyMcp(file, mcpUrl(ctx.panelOrigin), ctx.instanceId, ctx.key, deps.now());
+      } catch (error) {
+        mcpError = error instanceof SetupFailure ? error.code : "write_failed";
+        // The write is atomic, so a failed step wrote nothing and the removal has nothing to look for.
+        mcp = { mcpWritten: false, mcpCreated: false };
+        console.error(`harness agy mcp not configured (${mcpError})`);
+      }
+    } else {
+      // The provider is on disk now, so it is recorded before the installer runs.
+      await commit({ id, state: "partial", route });
+    }
     const hook = await deps.runInstaller({
       proxyOrigin: ctx.proxyOrigin,
       args: ["--client", client, "--base-url", route],
@@ -213,9 +237,13 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
       key: id === "agy" ? ctx.key : undefined,
       signal,
     });
-    if (hook.ok) return { id, state: "configured", route };
+    if (hook.ok) {
+      return mcpError
+        ? { id, state: "partial", error: mcpError, route, ...mcp }
+        : { id, state: "configured", route, ...mcp };
+    }
     console.error(`harness ${id} hook not installed (${hook.reason ?? "exit"} ${hook.exitCode ?? ""})`.trim());
-    return { id, state: id === "agy" ? "failed" : "partial", error: "installer_failed", route };
+    return { id, state: id === "agy" ? "failed" : "partial", error: "installer_failed", route, ...mcp };
   }
 
   async function doConfigure(credential: CredentialFile, abort: AbortController): Promise<void> {
@@ -228,6 +256,9 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
     const signal = abort.signal;
     running = true;
     removal = undefined;
+    const previous = record ?? (await deps.store.readHarness().catch(() => null));
+    const agyMcpCreated =
+      previous?.harnesses.some((h) => h.id === "agy" && h.mcpWritten === true && h.mcpCreated === true) ?? false;
     const base: HarnessFile = {
       version: 1,
       keyId: credential.keyId,
@@ -259,7 +290,13 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
       const current: HarnessFile = { ...base, proxyOrigin };
       record = current;
       await save();
-      const ctx = { proxyOrigin, instanceId: credential.instanceId, key: credential.key };
+      const ctx = {
+        proxyOrigin,
+        panelOrigin: credential.origin,
+        instanceId: credential.instanceId,
+        key: credential.key,
+        agyMcpCreated,
+      };
       const commit = async (entry: HarnessFile["harnesses"][number]) => {
         current.harnesses = [...current.harnesses.filter((item) => item.id !== entry.id), entry];
         await save();
@@ -285,6 +322,7 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
     const client = INSTALLER_CLIENT[entry.id];
     try {
       let outcome: Removal = "absent";
+      let mcpFailed = false;
       if (entry.id === "claude") {
         outcome = await removeClaude(claudeSettingsFile(paths), entry.route, rec.keyDigest, deps.now());
       } else if (entry.id === "codex") {
@@ -293,9 +331,20 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
         const results: Removal[] = [];
         for (const file of await ompModelsFiles(paths)) results.push(await removeOmp(file, entry.route, rec.keyDigest, deps.now()));
         outcome = combine(results);
-      } else if ((await checkAgyUrl(agyUrlFile(paths), entry.route, rec.keyDigest)) === "changed") {
-        // The installer's uninstall would delete a URL file the user edited, so it is not run.
-        return "kept";
+      } else {
+        // The MCP removal stands alone: when it fails, the URL file and the hook are still removed.
+        if (entry.mcpWritten) {
+          try {
+            outcome = await removeAgyMcp(agyMcpFile(paths), rec.keyDigest, entry.mcpCreated === true, deps.now());
+          } catch {
+            console.error("harness agy mcp entry not removed");
+            mcpFailed = true;
+          }
+        }
+        if ((await checkAgyUrl(agyUrlFile(paths), entry.route, rec.keyDigest)) === "changed") {
+          // The installer's uninstall would delete a URL file the user edited, so it is not run.
+          return mcpFailed ? "failed" : "kept";
+        }
       }
       const hook = await deps.runInstaller({
         proxyOrigin: rec.proxyOrigin,
@@ -307,6 +356,7 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
         console.error(`harness ${entry.id} hook not removed (${hook.reason ?? "exit"} ${hook.exitCode ?? ""})`.trim());
         return "failed";
       }
+      if (mcpFailed) return "failed";
       return outcome === "changed" ? "kept" : "removed";
     } catch {
       console.error(`harness ${entry.id} configuration not removed`);

@@ -39,6 +39,8 @@ export const codexDir = (p: Paths) => p.codexHome ?? join(p.home, ".codex");
 export const codexConfigFile = (p: Paths) => join(codexDir(p), "config.toml");
 export const ompAgentDir = (p: Paths) => p.ompDir ?? join(p.home, ".omp", "agent");
 export const agyDataDir = (p: Paths) => join(p.home, ".gemini", "antigravity-cli");
+/** The file `agy mcp add` writes; agy reads it for every launch. */
+export const agyMcpFile = (p: Paths) => join(p.home, ".gemini", "config", "mcp_config.json");
 export const agyUrlFile = (p: Paths) => join(p.home, ".agent-memory", "antigravity.url");
 
 const CLI_NAME: Record<HarnessId, string> = {

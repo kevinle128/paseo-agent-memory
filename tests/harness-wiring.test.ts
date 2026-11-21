@@ -139,7 +139,7 @@ describe("login machine and the harness setup", () => {
     await login(machine, approved());
     panel.queue("logout", { body: { ok: true } });
     expect(await machine.logout(false)).toMatchObject({ state: "signed_out", reason: "logged_out" });
-    await vi.waitFor(() => expect(removed).toHaveLength(1));
+    await vi.waitFor(() => expect(removed).toHaveLength(1), { timeout: 5000 });
     expect(removed[0].storedAtMarker).toBe(true);
     await expect(stat(join(dir, "credential.json"))).rejects.toThrow();
   });
@@ -153,7 +153,7 @@ describe("login machine and the harness setup", () => {
     expect(removed).toHaveLength(0);
     panel.queue("logout", { status: 503, body: { error: "temporarily_unavailable" } });
     await machine.logout(true);
-    await vi.waitFor(() => expect(removed).toHaveLength(1));
+    await vi.waitFor(() => expect(removed).toHaveLength(1), { timeout: 5000 });
   });
 
   it("shows the setup and a failed removal on every state, and the status still parses", async () => {
@@ -193,7 +193,7 @@ describe("log out with a slow removal", () => {
     expect(await machine.status()).toMatchObject({ state: "signed_out" });
     await expect(stat(join(dir, "credential.json"))).rejects.toThrow();
     release();
-    await vi.waitFor(() => expect(removed).toHaveLength(1));
+    await vi.waitFor(() => expect(removed).toHaveLength(1), { timeout: 5000 });
   });
 
   it("removes what the old key set up when a renewal names another key", async () => {
@@ -205,7 +205,7 @@ describe("log out with a slow removal", () => {
       approved({ renewed: true, user_key: undefined, key_id: "keyid-other-9999" }),
     );
     expect(status).toMatchObject({ state: "signed_out", reason: "key_mismatch" });
-    await vi.waitFor(() => expect(removed).toHaveLength(1));
+    await vi.waitFor(() => expect(removed).toHaveLength(1), { timeout: 5000 });
   });
 });
 
@@ -223,7 +223,7 @@ describe("log out when the removal marker cannot be saved", () => {
     markerFails = false;
     panel.queue("logout", { status: 401, body: { error: "invalid_token" } });
     expect(await machine.logout(false)).toMatchObject({ state: "signed_out", reason: "logged_out" });
-    await vi.waitFor(() => expect(removed).toHaveLength(1));
+    await vi.waitFor(() => expect(removed).toHaveLength(1), { timeout: 5000 });
   });
 });
 

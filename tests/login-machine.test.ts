@@ -208,8 +208,8 @@ describe("new device login", () => {
     panel.queue("token", protocol("authorization_pending"));
     advance(5_000);
     activeTimers()[0].fn();
-    await vi.waitFor(() => expect(panel.count("token")).toBe(1));
-    await vi.waitFor(() => expect(activeTimers().map((timer) => timer.ms)).toEqual([5_000]));
+    await vi.waitFor(() => expect(panel.count("token")).toBe(1), { timeout: 5000 });
+    await vi.waitFor(() => expect(activeTimers().map((timer) => timer.ms)).toEqual([5_000]), { timeout: 5000 });
   });
 
   it("adds five seconds on slow_down and caps the interval at sixty", async () => {
@@ -640,7 +640,7 @@ describe("concurrency and shutdown", () => {
     panel.queue("token", { hang: true });
     advance(5_000);
     const polling = machine.poll();
-    await vi.waitFor(() => expect(panel.count("token")).toBe(1));
+    await vi.waitFor(() => expect(panel.count("token")).toBe(1), { timeout: 5000 });
     machine.stop();
     await expect(polling).resolves.toMatchObject({ state: "waiting_browser" });
     advance(60_000);

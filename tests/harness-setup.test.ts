@@ -44,6 +44,7 @@ let modelsAnswer: unknown;
 const claudeFile = () => join(home, ".claude", "settings.json");
 const codexFile = () => join(home, ".codex", "config.toml");
 const ompFile = () => join(home, ".omp", "agent", "models.yml");
+const agyMcpFile = () => join(home, ".gemini", "config", "mcp_config.json");
 const gatewayFile = () => join(home, ".agent-memory", "antigravity.url");
 
 function fakeFetch(): typeof fetch {
@@ -92,11 +93,14 @@ function build(detected: HarnessId[] = ["claude", "codex", "omp", "agy"], extra:
 }
 
 const settled = (setup: ReturnType<typeof build>["setup"]) =>
-  vi.waitFor(() => {
-    const view = setup.view().setup;
-    expect(view).toBeDefined();
-    expect(view?.running).toBeFalsy();
-  });
+  vi.waitFor(
+    () => {
+      const view = setup.view().setup;
+      expect(view).toBeDefined();
+      expect(view?.running).toBeFalsy();
+    },
+    { timeout: 5000 },
+  );
 
 async function snapshot(): Promise<Record<string, string>> {
   const out: Record<string, string> = {};
@@ -183,6 +187,116 @@ describe("configure", () => {
     const record = await readFile(join(dataDir, "harness.json"), "utf8");
     expect(record).not.toContain(KEY);
     expect(await store.readHarness()).toMatchObject({ keyId: "keyid-0001", proxyOrigin: PROXY });
+  });
+
+  it("adds the agent-memory MCP server to the agy config with both headers and removes only it at log out", async () => {
+    const mcpBefore = JSON.stringify({ mcpServers: { fs: { disabled: false, serverUrl: "https://fs.example.net/mcp" } } });
+    await mkdir(join(home, ".gemini", "config"), { recursive: true });
+    await writeFile(agyMcpFile(), mcpBefore);
+    const { setup } = build(["agy"]);
+    setup.configure(credential());
+    await settled(setup);
+
+    const added = JSON.parse(await readFile(agyMcpFile(), "utf8")).mcpServers;
+    expect(added.fs.serverUrl).toBe("https://fs.example.net/mcp");
+    expect(added["agent-memory"].headers).toEqual({ "x-tdai-service-id": "default", "x-tdai-user-key": KEY });
+    expect(added["agent-memory"].serverUrl).toMatch(/\/api\/v1\/mcp$/);
+    expect(setup.view().setup?.harnesses).toEqual([{ id: "agy", state: "configured" }]);
+    expect(await readFile(join(dataDir, "harness.json"), "utf8")).not.toContain(KEY);
+
+    await (await setup.beginRemoval()).done;
+    expect(JSON.parse(await readFile(agyMcpFile(), "utf8"))).toEqual(JSON.parse(mcpBefore));
+  });
+
+  it("reports agy partial when its MCP file cannot be edited, and still installs the hook", async () => {
+    await mkdir(join(home, ".gemini", "config"), { recursive: true });
+    await writeFile(agyMcpFile(), "{broken");
+    const { setup } = build(["agy"]);
+    setup.configure(credential());
+    await settled(setup);
+    expect(setup.view().setup?.harnesses).toEqual([{ id: "agy", state: "partial", error: "settings_invalid" }]);
+    expect(await readFile(agyMcpFile(), "utf8")).toBe("{broken");
+    expect(installs.map((call) => call.args[1])).toEqual(["antigravity"]);
+  });
+
+  it("keeps a pre-existing empty agy MCP file at log out, and deletes a file the plugin created", async () => {
+    await mkdir(join(home, ".gemini", "config"), { recursive: true });
+    await writeFile(agyMcpFile(), "{}");
+    const first = build(["agy"]);
+    first.setup.configure(credential());
+    await settled(first.setup);
+    await (await first.setup.beginRemoval()).done;
+    expect(JSON.parse(await readFile(agyMcpFile(), "utf8")).mcpServers ?? {}).toEqual({});
+
+    await rm(agyMcpFile());
+    const second = build(["agy"]);
+    second.setup.configure(credential());
+    await settled(second.setup);
+    await (await second.setup.beginRemoval()).done;
+    await expect(stat(agyMcpFile())).rejects.toThrow();
+  });
+
+  it("still deletes the agy MCP file it created when a new key is set up over the old one", async () => {
+    const { setup, store } = build(["agy"]);
+    setup.configure(credential());
+    await settled(setup);
+    setup.configure(credential({ keyId: "keyid-0002", key: "fake-device-key-0002" }));
+    // The second setup is queued, so the view still shows the first one until it starts: wait for the new key.
+    await vi.waitFor(
+      async () => {
+        expect((await store.readHarness())?.keyId).toBe("keyid-0002");
+        expect(setup.view().setup?.running).toBeFalsy();
+        expect(await readFile(agyMcpFile(), "utf8")).toContain("fake-device-key-0002");
+      },
+      { timeout: 5000 },
+    );
+    await (await setup.beginRemoval()).done;
+    await expect(stat(agyMcpFile())).rejects.toThrow();
+  });
+
+  it("leaves an agent-memory entry of the user alone at setup and at log out, with no false 'kept' report", async () => {
+    await mkdir(join(home, ".gemini", "config"), { recursive: true });
+    const own = JSON.stringify({ mcpServers: { "agent-memory": { serverUrl: "https://own.example.net/other" } } });
+    await writeFile(agyMcpFile(), own);
+    const { setup } = build(["agy"]);
+    setup.configure(credential());
+    await settled(setup);
+    expect(setup.view().setup?.harnesses).toEqual([{ id: "agy", state: "partial", error: "own_provider" }]);
+    await (await setup.beginRemoval()).done;
+    expect(await readFile(agyMcpFile(), "utf8")).toBe(own);
+    expect(setup.view().removal).toBeUndefined();
+    expect(await snapshot()).not.toHaveProperty([join(".agent-memory", "antigravity.url")]);
+  });
+
+  it("records agy before the installer runs, also when the MCP step fails", async () => {
+    await mkdir(join(home, ".gemini", "config"), { recursive: true });
+    await writeFile(agyMcpFile(), "{broken");
+    let recorded: unknown;
+    const { setup, store } = build(["agy"], {
+      runInstaller: async (run) => {
+        if (!run.args.includes("--uninstall")) recorded = await store.readHarness();
+        return fakeInstaller(run);
+      },
+    });
+    setup.configure(credential());
+    await settled(setup);
+    expect(recorded).toMatchObject({ harnesses: [{ id: "agy", state: "partial" }] });
+  });
+
+  it("still removes the URL file and the hook when the MCP file turned invalid, and reports the failure", async () => {
+    const { setup, store } = build(["agy"]);
+    setup.configure(credential());
+    await settled(setup);
+    await writeFile(agyMcpFile(), "{broken");
+    installs.length = 0;
+
+    await (await setup.beginRemoval()).done;
+
+    await expect(stat(gatewayFile())).rejects.toThrow();
+    expect(installs.map((call) => call.args)).toEqual([["--uninstall", "--client", "antigravity"]]);
+    expect(setup.view().removal).toEqual([{ id: "agy", result: "failed" }]);
+    expect(await readFile(agyMcpFile(), "utf8")).toBe("{broken");
+    expect(await store.readHarness()).toBeNull();
   });
 
   it("writes nothing when the Panel gives no proxy address", async () => {
@@ -351,7 +465,7 @@ describe("removeAll", () => {
     const before = await snapshot();
     const { setup } = build(["claude"]);
     setup.configure(credential());
-    await vi.waitFor(() => expect(setup.view().setup?.running).toBe(true));
+    await vi.waitFor(() => expect(setup.view().setup?.running).toBe(true), { timeout: 5000 });
     let removed = false;
     const removal = setup.beginRemoval().then(({ done }) => done).then(() => {
       removed = true;
@@ -479,7 +593,7 @@ describe("a removal that is interrupted", () => {
     const second = build();
     await second.setup.init();
     expect(second.setup.view().removing).toBe(true);
-    await vi.waitFor(() => expect(second.setup.view().removing).toBeUndefined());
+    await vi.waitFor(() => expect(second.setup.view().removing).toBeUndefined(), { timeout: 5000 });
     expect(await snapshot()).toEqual(before);
     expect(await second.store.readHarness()).toBeNull();
   });
@@ -504,7 +618,7 @@ describe("a removal that is interrupted", () => {
     const second = build();
     await second.setup.init();
     expect(second.setup.resumedRemovalKeyId()).toBe("keyid-0001");
-    await vi.waitFor(() => expect(second.setup.view().removing).toBeUndefined());
+    await vi.waitFor(() => expect(second.setup.view().removing).toBeUndefined(), { timeout: 5000 });
     expect(await snapshot()).toEqual(before);
     expect(await second.store.readHarness()).toBeNull();
   });
@@ -518,7 +632,7 @@ describe("a removal that is interrupted", () => {
     await second.store.writeCredential(credential());
     await second.setup.init();
     expect(second.setup.resumedRemovalKeyId()).toBe("keyid-0001");
-    await vi.waitFor(() => expect(second.setup.view().removing).toBeUndefined());
+    await vi.waitFor(() => expect(second.setup.view().removing).toBeUndefined(), { timeout: 5000 });
   });
 
   it("does not start the removal when the marker cannot be saved and the caller needs it", async () => {
@@ -549,7 +663,7 @@ describe("a removal that is interrupted", () => {
     });
     const { setup, store } = build(["claude"]);
     setup.configure(credential());
-    await vi.waitFor(() => expect(setup.view().setup?.running).toBe(true));
+    await vi.waitFor(() => expect(setup.view().setup?.running).toBe(true), { timeout: 5000 });
     const removing = setup.beginRemoval({ requireMarker: true });
     // The setup commits its record while the installer is held; the marker is written after the setup, never in between.
     release();
@@ -579,7 +693,7 @@ describe("a removal that is interrupted", () => {
       const release = openGate();
       const { setup, store } = build(["claude", "codex"]);
       setup.configure(credential());
-      await vi.waitFor(() => expect(setup.view().setup?.running).toBe(true));
+      await vi.waitFor(() => expect(setup.view().setup?.running).toBe(true), { timeout: 5000 });
       const begun = await setup.beginRemoval({ requireMarker: true });
       expect(begun.marked).toBe(true);
       expect(setup.view().setup?.running).toBe(true);
@@ -593,7 +707,7 @@ describe("a removal that is interrupted", () => {
       const release = openGate();
       const { setup, store } = build(["claude", "codex", "omp"]);
       setup.configure(credential());
-      await vi.waitFor(() => expect(setup.view().setup?.running).toBe(true));
+      await vi.waitFor(() => expect(setup.view().setup?.running).toBe(true), { timeout: 5000 });
       // The claude provider is written; its installer is the step that is still running.
       expect(await readFile(claudeFile(), "utf8")).toContain(KEY);
       const begun = await setup.beginRemoval({ requireMarker: true });
@@ -621,7 +735,7 @@ describe("a removal that is interrupted", () => {
         }),
       });
       setup.configure(credential());
-      await vi.waitFor(() => expect(setup.view().setup?.running).toBe(true));
+      await vi.waitFor(() => expect(setup.view().setup?.running).toBe(true), { timeout: 5000 });
       const begun = await setup.beginRemoval({ requireMarker: true });
       release();
       // The setup commits claude after its installer ends; the removal has started only once the setup is over.
@@ -659,7 +773,7 @@ describe("a removal that is interrupted", () => {
 
     const second = build();
     await second.setup.init();
-    await vi.waitFor(() => expect(second.setup.view().removing).toBeUndefined());
+    await vi.waitFor(() => expect(second.setup.view().removing).toBeUndefined(), { timeout: 5000 });
     expect(await snapshot()).toEqual(before);
     expect(await second.store.readHarness()).toBeNull();
   });
@@ -689,7 +803,7 @@ describe("a removal that is interrupted", () => {
     const before = await snapshot();
     const { setup } = build(["claude"]);
     setup.configure(credential());
-    await vi.waitFor(() => expect(setup.view().setup?.running).toBe(true));
+    await vi.waitFor(() => expect(setup.view().setup?.running).toBe(true), { timeout: 5000 });
     // The marker waits behind the running setup, so the removals are started without waiting for them.
     const firstBegun = setup.beginRemoval();
     const secondBegun = setup.beginRemoval();

@@ -147,7 +147,7 @@ function SetupSummary({
       {setup.harnesses.map((item) => (
         <SettingsRow key={item.id} label={t(`harness.${item.id}`)}>
           <Text style={item.state === "failed" ? styles.error : styles.text}>
-            {item.id === "agy" && item.state === "partial"
+            {item.id === "agy" && item.state === "partial" && item.error
               ? t("harnessStateAgyPartial")
               : t(`harnessState.${item.state}`)}
           </Text>

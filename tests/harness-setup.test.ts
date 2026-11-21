@@ -236,6 +236,16 @@ describe("configure", () => {
     await expect(stat(agyMcpFile())).rejects.toThrow();
   });
 
+  it("still deletes the agy MCP file it created when a new key is set up over the old one", async () => {
+    const { setup } = build(["agy"]);
+    setup.configure(credential());
+    await settled(setup);
+    setup.configure(credential({ keyId: "keyid-0002", key: "fake-device-key-0002" }));
+    await settled(setup);
+    await (await setup.beginRemoval()).done;
+    await expect(stat(agyMcpFile())).rejects.toThrow();
+  });
+
   it("leaves an agent-memory entry of the user alone at setup and at log out, with no false 'kept' report", async () => {
     await mkdir(join(home, ".gemini", "config"), { recursive: true });
     const own = JSON.stringify({ mcpServers: { "agent-memory": { serverUrl: "https://own.example.net/other" } } });

@@ -180,7 +180,7 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
 
   async function configureOne(
     id: HarnessId,
-    ctx: { proxyOrigin: string; panelOrigin: string; instanceId: string; key: string },
+    ctx: { proxyOrigin: string; panelOrigin: string; instanceId: string; key: string; agyMcpCreated: boolean },
     signal: AbortSignal,
     commit: (entry: HarnessFile["harnesses"][number]) => Promise<void>,
   ): Promise<HarnessFile["harnesses"][number]> {
@@ -215,7 +215,8 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
     if (id === "agy") {
       const file = agyMcpFile(deps.paths);
       const existed = await stat(file).then(() => true, (error: NodeJS.ErrnoException) => error.code !== "ENOENT");
-      mcp = { mcpWritten: true, mcpCreated: !existed };
+      // A setup for a new key finds the file an earlier setup created, which stays the plugin's to delete.
+      mcp = { mcpWritten: true, mcpCreated: !existed || ctx.agyMcpCreated };
       await commit({ id, state: "partial", route, ...mcp });
       try {
         await applyAgyMcp(file, mcpUrl(ctx.panelOrigin), ctx.instanceId, ctx.key, deps.now());
@@ -255,6 +256,9 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
     const signal = abort.signal;
     running = true;
     removal = undefined;
+    const previous = record ?? (await deps.store.readHarness().catch(() => null));
+    const agyMcpCreated =
+      previous?.harnesses.some((h) => h.id === "agy" && h.mcpWritten === true && h.mcpCreated === true) ?? false;
     const base: HarnessFile = {
       version: 1,
       keyId: credential.keyId,
@@ -291,6 +295,7 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
         panelOrigin: credential.origin,
         instanceId: credential.instanceId,
         key: credential.key,
+        agyMcpCreated,
       };
       const commit = async (entry: HarnessFile["harnesses"][number]) => {
         current.harnesses = [...current.harnesses.filter((item) => item.id !== entry.id), entry];

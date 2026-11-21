@@ -567,6 +567,9 @@ export async function removeOmp(
 // ---------------------------------------------------------------------------------------------------
 // Antigravity: the gateway URL file that the installer writes
 
+/** The content of the URL file: the proxy route of the client, then the key. */
+export const agyGatewayUrl = (route: string, key: string): string => `${route}/${key}`;
+
 export async function checkAgyUrl(
   file: string,
   route: string,
@@ -576,7 +579,7 @@ export async function checkAgyUrl(
     const text = await readIfExists(file);
     if (text === null) return "absent";
     const value = text.trim();
-    const prefix = `${route}/`;
+    const prefix = agyGatewayUrl(route, "");
     return value.startsWith(prefix) && isKey(value.slice(prefix.length), digest) ? "ours" : "changed";
   });
 }

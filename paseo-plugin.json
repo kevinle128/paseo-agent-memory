@@ -1,0 +1,7 @@
+{
+  "id": "paseo-agent-memory",
+  "name": "Agent-Memory",
+  "description": "Connect Paseo to Agent-Memory with your VTC mail account.",
+  "media": [],
+  "requirements": { "paseo": ">=0.16.0 <0.17.0" }
+}

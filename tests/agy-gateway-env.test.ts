@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -40,7 +40,7 @@ const harness = (
   proxyOrigin: PROXY,
   instanceId: "default",
   configuredAt: new Date(NOW).toISOString(),
-  paths: { home: "/tmp/none", shell: "/bin/zsh" },
+  paths: { home: dir, shell: "/bin/zsh" },
   harnesses: [
     { id: "claude", state: "configured", route: `${PROXY}/claude-code/default` },
     ...(agy
@@ -51,8 +51,15 @@ const harness = (
 });
 
 let dir: string;
+const urlFile = () => join(dir, ".agent-memory", "antigravity.url");
+async function writeUrlFile(text: string) {
+  await mkdir(join(dir, ".agent-memory"), { recursive: true });
+  await writeFile(urlFile(), text);
+}
 beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "pam-agy-gateway-"));
+  // The file the installer writes for the setup of KEY; tests of another key write their own.
+  await writeUrlFile(`${PROXY}/antigravity/default/${KEY}\n`);
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
@@ -174,11 +181,28 @@ describe("agent open hook for the gateway URL", () => {
     await store.writeCredential(credential(KEY2));
     expect(await hook({ request })).toBeUndefined();
     await store.writeHarness(harness(KEY2));
+    await writeUrlFile(`${PROXY}/antigravity/default/${KEY2}\n`);
     expect((await hook({ request }))?.env[AGY_GATEWAY_ENV]).toBe(`${PROXY}/antigravity/default/${KEY2}`);
+  });
+
+  it("keeps a URL file the user edited or removed", async () => {
+    const store = createStore(dir);
+    await store.writeCredential(credential());
+    await store.writeHarness(harness());
+    const { hook } = hookFor(store);
+    await writeUrlFile(`${PROXY}/antigravity/default/memory-off\n`);
+    expect(await hook({ request })).toBeUndefined();
+    await writeUrlFile("https://own.example.net/gateway\n");
+    expect(await hook({ request })).toBeUndefined();
+    await rm(urlFile());
+    expect(await hook({ request })).toBeUndefined();
+    await writeUrlFile(`${PROXY}/antigravity/default/${KEY}\n`);
+    expect((await hook({ request }))?.env[AGY_GATEWAY_ENV]).toBe(`${PROXY}/antigravity/default/${KEY}`);
   });
 
   it("gives nothing when the record is of the old key, expired, or the address changed", async () => {
     const store = createStore(dir);
+    await writeUrlFile(`${PROXY}/antigravity/default/${KEY2}\n`);
     await store.writeCredential(credential(KEY2));
     await store.writeHarness(harness(KEY));
     expect(await hookFor(store).hook({ request })).toBeUndefined();

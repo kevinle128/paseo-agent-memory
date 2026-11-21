@@ -1,4 +1,5 @@
-import { agyGatewayUrl, keyDigest } from "./harness-files";
+import { agyGatewayUrl, checkAgyUrl, keyDigest } from "./harness-files";
+import { agyUrlFile } from "./harness-paths";
 import { credentialMatchesOrigin } from "../shared/view";
 import type { CredentialFile, HarnessFile } from "./store";
 
@@ -11,7 +12,7 @@ export interface AgyGatewayInput {
   credential: Pick<CredentialFile, "origin" | "instanceId" | "key" | "expiresAt"> | null;
   /** The address in the saved settings now; a login for another address gives no value. */
   settingsOrigin: string | null;
-  harness: Pick<HarnessFile, "keyDigest" | "removalPending" | "error" | "instanceId" | "harnesses"> | null;
+  harness: Pick<HarnessFile, "keyDigest" | "removalPending" | "error" | "instanceId" | "harnesses" | "paths"> | null;
   nowMs: number;
 }
 
@@ -67,14 +68,21 @@ export function createAgyGatewayEnvHook(deps: AgyGatewayDeps) {
     // here is an explicit choice (for example a URL without memory) and wins over the plugin.
     if (request.env[AGY_GATEWAY_ENV]) return undefined;
     try {
+      const harness = await deps.readHarness();
       const url = agyGatewayUrlFor({
         provider: request.provider,
         credential: await deps.readCredential(),
         settingsOrigin: await deps.readSettingsOrigin(),
-        harness: await deps.readHarness(),
+        harness,
         nowMs: deps.now(),
       });
-      if (!url) return undefined;
+      if (!url || !harness) return undefined;
+      // The URL file still holds the plugin's entry: a file the user edited or removed (for example with the
+      // installer's uninstall) is the user's choice, and the plugin does not override it at launch either.
+      const route = harness.harnesses.find((h) => h.id === "agy")?.route;
+      if (!route || (await checkAgyUrl(agyUrlFile(harness.paths), route, harness.keyDigest)) !== "ours") {
+        return undefined;
+      }
       return { ...request, env: { ...request.env, [AGY_GATEWAY_ENV]: url } };
     } catch (error) {
       deps.log(`antigravity gateway env skipped (${error instanceof Error ? error.name : "unknown"})`);

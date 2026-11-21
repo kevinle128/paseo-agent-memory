@@ -237,11 +237,19 @@ describe("configure", () => {
   });
 
   it("still deletes the agy MCP file it created when a new key is set up over the old one", async () => {
-    const { setup } = build(["agy"]);
+    const { setup, store } = build(["agy"]);
     setup.configure(credential());
     await settled(setup);
     setup.configure(credential({ keyId: "keyid-0002", key: "fake-device-key-0002" }));
-    await settled(setup);
+    // The second setup is queued, so the view still shows the first one until it starts: wait for the new key.
+    await vi.waitFor(
+      async () => {
+        expect((await store.readHarness())?.keyId).toBe("keyid-0002");
+        expect(setup.view().setup?.running).toBeFalsy();
+        expect(await readFile(agyMcpFile(), "utf8")).toContain("fake-device-key-0002");
+      },
+      { timeout: 5000 },
+    );
     await (await setup.beginRemoval()).done;
     await expect(stat(agyMcpFile())).rejects.toThrow();
   });

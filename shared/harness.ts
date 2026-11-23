@@ -33,15 +33,44 @@ export type HarnessErrorCode = z.infer<typeof HarnessErrorCode>;
 export const SetupError = z.enum(["no_proxy", "bad_key"]);
 export type SetupError = z.infer<typeof SetupError>;
 
+/** Which part of one client's setup failed. */
+export const SetupStep = z.enum(["config", "mcp", "hook"]);
+export type SetupStep = z.infer<typeof SetupStep>;
+
+/** Why the hook installer stopped. Stored without any of the installer's output. */
+export const HookFailureReason = z.enum(["download", "spawn", "timeout", "exit"]);
+export type HookFailureReason = z.infer<typeof HookFailureReason>;
+
+export const HarnessFailure = z.object({
+  step: SetupStep,
+  error: HarnessErrorCode,
+  reason: HookFailureReason.optional(),
+  exitCode: z.number().nullable().optional(),
+});
+export type HarnessFailure = z.infer<typeof HarnessFailure>;
+
+/** A failure as the account screen shows it. `output` is redacted stderr and is never stored. */
+export const HarnessFailureView = HarnessFailure.extend({
+  output: z.array(z.string().max(200)).max(5).optional(),
+});
+export type HarnessFailureView = z.infer<typeof HarnessFailureView>;
+
 export const RemovalResult = z.enum(["kept", "failed"]);
 export type RemovalResult = z.infer<typeof RemovalResult>;
 
 export const SetupView = z.object({
   configuredAt: z.string(),
   running: z.boolean().optional(),
+  /** Clients whose install is queued, first one running. */
+  installing: z.array(HarnessId).optional(),
   error: SetupError.optional(),
   harnesses: z.array(
-    z.object({ id: HarnessId, state: HarnessState, error: HarnessErrorCode.optional() }),
+    z.object({
+      id: HarnessId,
+      state: HarnessState,
+      error: HarnessErrorCode.optional(),
+      failures: z.array(HarnessFailureView).optional(),
+    }),
   ),
 });
 export type SetupView = z.infer<typeof SetupView>;

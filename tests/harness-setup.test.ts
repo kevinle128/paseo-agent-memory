@@ -214,7 +214,14 @@ describe("configure", () => {
     const { setup } = build(["agy"]);
     setup.configure(credential());
     await settled(setup);
-    expect(setup.view().setup?.harnesses).toEqual([{ id: "agy", state: "partial", error: "settings_invalid" }]);
+    expect(setup.view().setup?.harnesses).toEqual([
+      {
+        id: "agy",
+        state: "partial",
+        error: "settings_invalid",
+        failures: [{ step: "mcp", error: "settings_invalid" }],
+      },
+    ]);
     expect(await readFile(agyMcpFile(), "utf8")).toBe("{broken");
     expect(installs.map((call) => call.args[1])).toEqual(["antigravity"]);
   });
@@ -261,7 +268,14 @@ describe("configure", () => {
     const { setup } = build(["agy"]);
     setup.configure(credential());
     await settled(setup);
-    expect(setup.view().setup?.harnesses).toEqual([{ id: "agy", state: "partial", error: "own_provider" }]);
+    expect(setup.view().setup?.harnesses).toEqual([
+      {
+        id: "agy",
+        state: "partial",
+        error: "own_provider",
+        failures: [{ step: "mcp", error: "own_provider" }],
+      },
+    ]);
     await (await setup.beginRemoval()).done;
     expect(await readFile(agyMcpFile(), "utf8")).toBe(own);
     expect(setup.view().removal).toBeUndefined();
@@ -335,9 +349,9 @@ describe("configure", () => {
     setup.configure(credential());
     await settled(setup);
     expect(setup.view().setup?.harnesses).toEqual([
-      { id: "claude", state: "failed", error: "settings_invalid" },
-      { id: "codex", state: "failed", error: "codex_profile" },
-      { id: "omp", state: "failed", error: "no_models" },
+      { id: "claude", state: "failed", error: "settings_invalid", failures: [{ step: "config", error: "settings_invalid" }] },
+      { id: "codex", state: "failed", error: "codex_profile", failures: [{ step: "config", error: "codex_profile" }] },
+      { id: "omp", state: "failed", error: "no_models", failures: [{ step: "config", error: "no_models" }] },
       { id: "agy", state: "configured" },
     ]);
     expect(await readFile(claudeFile(), "utf8")).toBe("{broken");
@@ -350,7 +364,12 @@ describe("configure", () => {
     setup.configure(credential());
     await settled(setup);
     expect(setup.view().setup?.harnesses).toEqual([
-      { id: "codex", state: "partial", error: "installer_failed" },
+      {
+        id: "codex",
+        state: "partial",
+        error: "installer_failed",
+        failures: [{ step: "hook", error: "installer_failed", reason: "exit", exitCode: 1 }],
+      },
     ]);
     expect(await readFile(codexFile(), "utf8")).toContain("team-proxy");
   });
@@ -361,7 +380,12 @@ describe("configure", () => {
     setup.configure(credential());
     await settled(setup);
     expect(setup.view().setup?.harnesses).toEqual([
-      { id: "agy", state: "failed", error: "installer_failed" },
+      {
+        id: "agy",
+        state: "failed",
+        error: "installer_failed",
+        failures: [{ step: "hook", error: "installer_failed", reason: "exit", exitCode: 1 }],
+      },
     ]);
   });
 
@@ -504,8 +528,8 @@ describe("a tool that already has its own provider", () => {
     setup.configure(credential());
     await settled(setup);
     expect(setup.view().setup?.harnesses).toEqual([
-      { id: "claude", state: "failed", error: "own_provider" },
-      { id: "codex", state: "failed", error: "own_provider" },
+      { id: "claude", state: "failed", error: "own_provider", failures: [{ step: "config", error: "own_provider" }] },
+      { id: "codex", state: "failed", error: "own_provider", failures: [{ step: "config", error: "own_provider" }] },
     ]);
     expect(await readFile(claudeFile(), "utf8")).toBe(ownClaude);
     expect(await readFile(codexFile(), "utf8")).toBe(ownCodex);
@@ -822,5 +846,223 @@ describe("a removal that is interrupted", () => {
     expect(setup.view().setup?.harnesses).toEqual([{ id: "claude", state: "configured" }]);
     expect(JSON.parse(await readFile(claudeFile(), "utf8")).env.ANTHROPIC_AUTH_TOKEN).toBe("fake-device-key-0002");
     expect(before).not.toEqual(await snapshot());
+  });
+});
+
+const idle = (setup: ReturnType<typeof build>["setup"]) =>
+  vi.waitFor(() => expect(setup.view().setup?.installing).toBeFalsy(), { timeout: 5000 });
+
+describe("hook failure details", () => {
+  it("reports a spawn failure without keeping the installer's text", async () => {
+    const { setup } = build(["codex"], {
+      runInstaller: async () => ({ ok: false, reason: "spawn", exitCode: null }),
+    });
+    setup.configure(credential());
+    await settled(setup);
+    expect(setup.view().setup?.harnesses).toEqual([
+      {
+        id: "codex",
+        state: "partial",
+        error: "installer_failed",
+        failures: [{ step: "hook", error: "installer_failed", reason: "spawn", exitCode: null }],
+      },
+    ]);
+  });
+
+  it("keeps both the MCP failure and the hook failure for agy", async () => {
+    await mkdir(join(home, ".gemini", "config"), { recursive: true });
+    await writeFile(agyMcpFile(), "{broken");
+    const { setup } = build(["agy"], {
+      runInstaller: async () => ({ ok: false, reason: "download" }),
+    });
+    setup.configure(credential());
+    await settled(setup);
+    expect(setup.view().setup?.harnesses[0]).toMatchObject({
+      id: "agy",
+      state: "failed",
+      error: "settings_invalid",
+      failures: [
+        { step: "mcp", error: "settings_invalid" },
+        { step: "hook", error: "installer_failed", reason: "download" },
+      ],
+    });
+  });
+
+  it("stores the failure codes and keeps the installer text only in memory", async () => {
+    const sentinel = "HOOK_STDERR_SENTINEL";
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const logs = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const { setup, store } = build(["codex"], {
+      runInstaller: async () => ({
+        ok: false,
+        reason: "exit",
+        exitCode: 1,
+        output: [`${sentinel} ${KEY}`],
+      }),
+    });
+    setup.configure(credential());
+    await settled(setup);
+    expect(setup.view().setup?.harnesses[0].failures?.[0]).toMatchObject({
+      step: "hook",
+      output: [`${sentinel} ${KEY}`],
+    });
+    const disk = await readFile(join(dataDir, "harness.json"), "utf8");
+    expect(disk).toContain('"failures"');
+    expect(disk).not.toContain("output");
+    expect(disk).not.toContain(sentinel);
+    expect(disk).not.toContain(KEY);
+    const logged = JSON.stringify([...errors.mock.calls, ...logs.mock.calls]);
+    expect(logged).not.toContain(sentinel);
+    expect(logged).not.toContain(KEY);
+
+    await store.writeCredential(credential());
+    const restarted = createHarnessSetup({
+      store: createStore(dataDir),
+      paths,
+      detect: async () => ["codex"],
+      runInstaller: fakeInstaller,
+      now: () => NOW,
+      signal: new AbortController().signal,
+      fetch: fakeFetch(),
+    });
+    await restarted.init();
+    const failure = restarted.view().setup?.harnesses[0].failures?.[0];
+    expect(failure).toMatchObject({ step: "hook", error: "installer_failed", reason: "exit", exitCode: 1 });
+    expect(failure).not.toHaveProperty("output");
+  });
+});
+
+describe("install one client", () => {
+  it("installs the hook for one client and keeps the other entries", async () => {
+    installFails = (run) => run.args.includes("codex");
+    const { setup } = build(["claude", "codex"]);
+    setup.configure(credential());
+    await settled(setup);
+    installFails = () => false;
+    const before = installs.length;
+    expect(setup.install(credential(), "codex")).toBe(true);
+    await vi.waitFor(() => {
+      expect(setup.view().setup?.harnesses.find((item) => item.id === "codex")?.state).toBe("configured");
+    });
+    expect(setup.view().setup?.harnesses.find((item) => item.id === "claude")).toMatchObject({
+      state: "configured",
+    });
+    expect(installs.slice(before).map((call) => call.args)).toEqual([
+      ["--client", "codex", "--base-url", `${PROXY}/codex/default`],
+    ]);
+  });
+
+  it("runs only the hook when the provider is already in place", async () => {
+    installFails = (run) => run.args.includes("omp");
+    let modelCalls = 0;
+    const { setup } = build(["omp"], {
+      fetch: (async (url: string) => {
+        if (String(url).endsWith("/v1/models")) modelCalls += 1;
+        return fakeFetch()(url);
+      }) as typeof fetch,
+    });
+    setup.configure(credential());
+    await settled(setup);
+    expect(setup.view().setup?.harnesses[0].state).toBe("partial");
+    const callsAfterSetup = modelCalls;
+    modelsAnswer = { data: [] };
+    installFails = () => false;
+    expect(setup.install(credential(), "omp")).toBe(true);
+    await vi.waitFor(() => expect(setup.view().setup?.harnesses[0].state).toBe("configured"));
+    expect(modelCalls).toBe(callsAfterSetup);
+    await (await setup.beginRemoval()).done;
+    expect(await readFile(ompFile(), "utf8")).not.toContain("memory-anthropic");
+    expect(await readFile(ompFile(), "utf8")).not.toContain(PROXY);
+  });
+
+  it("sets up a client whose file could not be edited before", async () => {
+    await writeFile(claudeFile(), "{broken");
+    const { setup } = build(["claude"]);
+    setup.configure(credential());
+    await settled(setup);
+    expect(setup.view().setup?.harnesses[0].state).toBe("failed");
+    await writeFile(claudeFile(), CLAUDE_SETTINGS);
+    expect(setup.install(credential(), "claude")).toBe(true);
+    await vi.waitFor(() => expect(setup.view().setup?.harnesses[0].state).toBe("configured"));
+    expect(JSON.parse(await readFile(claudeFile(), "utf8")).env.ANTHROPIC_AUTH_TOKEN).toBe(KEY);
+  });
+
+  it("keeps the agy MCP file the plugin created as its own on a second install", async () => {
+    installFails = () => true;
+    const { setup } = build(["agy"]);
+    setup.configure(credential());
+    await settled(setup);
+    expect(setup.view().setup?.harnesses[0]).toMatchObject({ state: "failed", error: "installer_failed" });
+    installFails = () => false;
+    expect(setup.install(credential(), "agy")).toBe(true);
+    await vi.waitFor(() => expect(setup.view().setup?.harnesses[0].state).toBe("configured"));
+    await (await setup.beginRemoval()).done;
+    await expect(stat(agyMcpFile())).rejects.toThrow();
+  });
+
+  it("stops an install on log out and removes what it wrote", async () => {
+    const before = await snapshot();
+    installFails = () => true;
+    const { setup } = build(["claude"]);
+    setup.configure(credential());
+    await settled(setup);
+    installFails = () => false;
+    let release: () => void = () => undefined;
+    hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    expect(setup.install(credential(), "claude")).toBe(true);
+    await vi.waitFor(() => expect(setup.view().setup?.installing).toEqual(["claude"]));
+    const removal = setup.beginRemoval().then(({ done }) => done);
+    release();
+    hold = null;
+    await removal;
+    expect(await snapshot()).toEqual(before);
+  });
+
+  it("refuses an install for another key, during a removal, for the same client twice, or for a client that is not detected", async () => {
+    const { setup } = build(["claude"]);
+    setup.configure(credential());
+    await settled(setup);
+    const calls = installs.length;
+
+    expect(setup.install(credential({ key: "fake-device-key-9999", keyId: "keyid-9999" }), "claude")).toBe(true);
+    await idle(setup);
+    expect(setup.install(credential(), "codex")).toBe(true);
+    await idle(setup);
+    expect(installs).toHaveLength(calls);
+
+    let release: () => void = () => undefined;
+    hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    expect(installs).toHaveLength(calls);
+    expect(setup.install(credential(), "claude")).toBe(true);
+    expect(setup.install(credential(), "claude")).toBe(false);
+    expect(installs).toHaveLength(calls);
+    const removal = setup.beginRemoval().then(({ done }) => done);
+    expect(setup.install(credential(), "claude")).toBe(false);
+    release();
+    hold = null;
+    await removal;
+  });
+
+  it("reports the clients that wait for an install, in order", async () => {
+    installFails = () => true;
+    const { setup } = build(["claude", "codex"]);
+    setup.configure(credential());
+    await settled(setup);
+    installFails = () => false;
+    let release: () => void = () => undefined;
+    hold = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    expect(setup.install(credential(), "claude")).toBe(true);
+    expect(setup.install(credential(), "codex")).toBe(true);
+    expect(setup.view().setup?.installing).toEqual(["claude", "codex"]);
+    release();
+    hold = null;
+    await idle(setup);
+    expect(setup.view().setup?.harnesses.map((item) => item.state)).toEqual(["configured", "configured"]);
   });
 });

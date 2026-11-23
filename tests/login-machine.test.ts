@@ -9,7 +9,9 @@ import {
   sanitizeDeviceName,
   type MachineSettings,
 } from "../server/login-machine";
+import type { HarnessSetup } from "../server/harness-setup";
 import { createStore } from "../server/store";
+import type { HarnessId } from "../shared/harness";
 import type { AccountStatus } from "../shared/status";
 import { startFakePanel, type FakePanel, type Scripted } from "./fake-panel";
 
@@ -59,7 +61,7 @@ let settings: MachineSettings;
 let logs: string[];
 let statuses: AccountStatus[];
 
-function build() {
+function build(harness?: HarnessSetup) {
   const store = createStore(dir);
   const machine = createLoginMachine({
     store,
@@ -75,6 +77,7 @@ function build() {
     },
     hostName: () => "test-host",
     abort: () => controller.abort(),
+    harness,
   });
   const record = async (promise: Promise<AccountStatus>) => {
     const status = await promise;
@@ -88,6 +91,11 @@ function build() {
     poll: () => record(machine.poll()),
     login: () => record(machine.login()),
     logout: (force = false) => record(machine.logout(force)),
+    installHook: async (id: HarnessId) => {
+      const reply = await machine.installHook(id);
+      statuses.push(reply.status);
+      return reply;
+    },
     stop: () => machine.stop(),
   };
 }
@@ -649,5 +657,41 @@ describe("concurrency and shutdown", () => {
     expect(panel.count("token")).toBe(1);
     expect(panel.count("start")).toBe(1);
     expect(activeTimers()).toEqual([]);
+  });
+});
+
+describe("installHook", () => {
+  function harness(install: (credential: { key: string }, id: HarnessId) => boolean): HarnessSetup {
+    return {
+      init: async () => undefined,
+      resumedRemovalKeyId: () => undefined,
+      configure: () => undefined,
+      beginRemoval: async () => ({ done: Promise.resolve(), marked: true }),
+      view: () => ({}),
+      install,
+    } as unknown as HarnessSetup;
+  }
+
+  it("does not install when the account is not connected", async () => {
+    const install = vi.fn(() => true);
+    const machine = build(harness(install));
+    await machine.init();
+    const reply = await machine.installHook("claude");
+    expect(reply.accepted).toBe(false);
+    expect(reply.status.state).not.toBe("connected");
+    expect(install).not.toHaveBeenCalled();
+  });
+
+  it("asks the harness to install the chosen client once connected", async () => {
+    const install = vi.fn((_credential: { key: string }, _id: HarnessId) => true);
+    const machine = build(harness(install));
+    await machine.init();
+    await connect(machine);
+    const reply = await machine.installHook("codex");
+    expect(reply.accepted).toBe(true);
+    expect(reply.status.state).toBe("connected");
+    expect(install).toHaveBeenCalledTimes(1);
+    expect(install.mock.calls[0]?.[1]).toBe("codex");
+    expect(install.mock.calls[0]?.[0]).toMatchObject({ key: KEY, origin: panel.origin });
   });
 });

@@ -97,6 +97,63 @@ describe("store", () => {
     expect(await createStore(dir).readPending()).toBeNull();
   });
 
+  it("reads a harness record from before failure details existed", async () => {
+    const older = {
+      version: 1,
+      keyId: "key-abcd",
+      keyDigest: "a".repeat(64),
+      proxyOrigin: "https://proxy.example",
+      instanceId: "default",
+      configuredAt: "2026-01-01T00:00:00.000Z",
+      paths: { home: "/tmp/home", shell: "/bin/zsh" },
+      harnesses: [
+        {
+          id: "claude",
+          state: "partial",
+          error: "installer_failed",
+          route: "https://proxy.example/claude-code/default",
+        },
+      ],
+    };
+    await writeFile(join(dir, "harness.json"), JSON.stringify(older), { mode: 0o600 });
+    expect(await createStore(dir).readHarness()).toEqual(older);
+  });
+
+  it("drops installer output if a record on disk carries it", async () => {
+    const withOutput = {
+      version: 1,
+      keyId: "key-abcd",
+      keyDigest: "b".repeat(64),
+      proxyOrigin: "https://proxy.example",
+      instanceId: "default",
+      configuredAt: "2026-01-01T00:00:00.000Z",
+      paths: { home: "/tmp/home", shell: "/bin/zsh" },
+      harnesses: [
+        {
+          id: "codex",
+          state: "partial",
+          error: "installer_failed",
+          route: "https://proxy.example/codex/default",
+          failures: [
+            {
+              step: "hook",
+              error: "installer_failed",
+              reason: "exit",
+              exitCode: 1,
+              output: ["leaked-installer-line"],
+            },
+          ],
+        },
+      ],
+    };
+    await writeFile(join(dir, "harness.json"), JSON.stringify(withOutput), { mode: 0o600 });
+    const read = await createStore(dir).readHarness();
+    expect(read?.harnesses[0].failures).toEqual([
+      { step: "hook", error: "installer_failed", reason: "exit", exitCode: 1 },
+    ]);
+    expect(JSON.stringify(read)).not.toContain("leaked-installer-line");
+  });
+
   it("returns null for a missing file and deletes idempotently", async () => {
     const store = createStore(dir);
     expect(await store.readCredential()).toBeNull();

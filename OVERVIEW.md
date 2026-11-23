@@ -27,6 +27,8 @@ On a new login the plugin writes harness configuration for the tools installed o
 
 It copies each existing file to a backup before it changes the file. Other settings in those files are kept. Log out removes the entries the plugin added.
 
+A tool that did not finish setup shows the failed step and a short reason on the account screen. Install hook or Try again runs that tool again. A tool you install after logging in is not set up automatically.
+
 While an agent is open, the plugin sends the device key to the Panel MCP server as the `x-tdai-user-key` header. Claude, Codex, and omp receive that entry from the `agent.open.before` hook. Antigravity reads it from its own config file. The account screen has a switch, "Turn on the agent-memory MCP". It stays on until you turn it off, and a change applies the next time an agent opens.
 
 The hook reads local files only. When you are logged out, the key has expired, or the saved address no longer matches the login, agents open without the MCP entry.

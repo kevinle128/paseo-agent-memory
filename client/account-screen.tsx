@@ -19,7 +19,8 @@ import {
   copyText,
   useToast,
 } from "@getpaseo/plugin/client/ui";
-import { loginRpc, logoutRpc, pollRpc, statusRpc } from "../shared/rpc";
+import type { HarnessId } from "../shared/harness";
+import { installHookRpc, loginRpc, logoutRpc, pollRpc, statusRpc } from "../shared/rpc";
 import { connection, mcp } from "../shared/settings";
 import type { AccountStatus } from "../shared/status";
 import { mcpEnabled, refetchIntervalFor } from "../shared/view";
@@ -77,6 +78,23 @@ function useStyles(theme: Theme, compact: boolean) {
       },
       pillText: { color: theme.colors.statusWarning },
       section: { gap: 8 },
+      stack: { gap: 6, flexShrink: 1 },
+      detail: {
+        gap: 8,
+        marginTop: 4,
+        padding: 10,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderColor: theme.colors.border,
+        backgroundColor: theme.colors.surface2,
+      },
+      detailLabel: {
+        color: theme.colors.foregroundMuted,
+        fontSize: 11,
+        fontWeight: "600",
+        textTransform: "uppercase",
+      },
+      code: { color: theme.colors.foreground, fontFamily: "monospace", fontSize: 12 },
       selectable: { color: theme.colors.foreground, fontFamily: "monospace" },
     });
   }, [theme, compact]);
@@ -86,6 +104,7 @@ type Styles = ReturnType<typeof useStyles>;
 interface Actions {
   login(): Promise<void>;
   logout(force?: boolean): Promise<void>;
+  installHook(id: HarnessId): Promise<void>;
   openBrowser(url: string): Promise<boolean>;
   busy: boolean;
   // The browser could not be opened after login, so the link must be visible at once.
@@ -128,14 +147,51 @@ function TextLink({ label, onPress, styles }: { label: string; onPress(): void; 
   );
 }
 
+const CONFIG_FILE: Record<HarnessId, string> = {
+  claude: "~/.claude/settings.json",
+  codex: "~/.codex/config.toml",
+  omp: "models.yml",
+  agy: "~/.gemini/config/mcp_config.json",
+};
+
+type Setup = NonNullable<AccountStatus["setup"]>;
+type SetupItem = Setup["harnesses"][number];
+
+function detailsText(item: SetupItem): string {
+  const lines: string[] = [item.id, item.state];
+  for (const failure of item.failures ?? []) {
+    lines.push(failure.step, failure.error);
+    if (failure.reason) lines.push(failure.reason);
+    if (failure.exitCode !== undefined && failure.exitCode !== null) lines.push(String(failure.exitCode));
+    for (const line of failure.output ?? []) lines.push(line);
+  }
+  return lines.join("\n");
+}
+
 function SetupSummary({
   setup,
+  actions,
   styles,
 }: {
-  setup: NonNullable<AccountStatus["setup"]>;
+  setup: Setup;
+  actions: Actions;
   styles: Styles;
 }) {
   const { t } = useTranslation(messages);
+  const toast = useToast();
+  const installing = setup.installing ?? [];
+  const locked = actions.busy || !!setup.running || installing.length > 0;
+  const copy = useCallback(
+    async (item: SetupItem) => {
+      try {
+        await copyText(detailsText(item));
+        toast.show(t("detailsCopied"), { variant: "success" });
+      } catch {
+        toast.error(t("detailsCopyFailed"));
+      }
+    },
+    [t, toast],
+  );
   return (
     <View style={styles.section}>
       <Text style={styles.text}>{t("setupTitle")}</Text>
@@ -144,16 +200,85 @@ function SetupSummary({
       {!setup.running && !setup.error && setup.harnesses.length === 0 ? (
         <Text style={styles.muted}>{t("setupNone")}</Text>
       ) : null}
-      {setup.harnesses.map((item) => (
-        <SettingsRow key={item.id} label={t(`harness.${item.id}`)}>
-          <Text style={item.state === "failed" ? styles.error : styles.text}>
-            {item.id === "agy" && item.state === "partial" && item.error
-              ? t("harnessStateAgyPartial")
-              : t(`harnessState.${item.state}`)}
-          </Text>
-          {item.error ? <Text style={styles.muted}>{t(`harnessErrors.${item.error}`)}</Text> : null}
-        </SettingsRow>
-      ))}
+      {setup.harnesses.map((item) => {
+        const active = installing[0] === item.id;
+        const queued = installing.includes(item.id);
+        const stateLabel =
+          item.id === "agy" && item.state === "partial" && item.error
+            ? t("harnessStateAgyPartial")
+            : t(`harnessState.${item.state}`);
+        return (
+          <SettingsRow key={item.id} label={t(`harness.${item.id}`)}>
+            <View style={styles.stack}>
+              {active ? (
+                <View style={styles.row}>
+                  <ActivityIndicator />
+                  <Text style={styles.text}>{t("installing")}</Text>
+                </View>
+              ) : (
+                <Text style={item.state === "failed" ? styles.error : styles.text}>{stateLabel}</Text>
+              )}
+              {queued && !active ? <Text style={styles.muted}>{t("installWaiting")}</Text> : null}
+              {!queued && item.error ? (
+                <Text style={styles.muted}>{t(`harnessErrors.${item.error}`)}</Text>
+              ) : null}
+              {!queued && item.failures && item.failures.length > 0 ? (
+                <View style={styles.detail}>
+                  {item.failures.map((failure, index) => {
+                    const file = CONFIG_FILE[item.id];
+                    const reason =
+                      failure.step === "hook" && failure.reason
+                        ? t(
+                            failure.reason === "exit" && failure.exitCode == null
+                              ? "hookReasons.killed"
+                              : `hookReasons.${failure.reason}`,
+                            { code: failure.exitCode ?? "" },
+                          )
+                        : t(`harnessErrors.${failure.error}`);
+                    const fix =
+                      failure.step === "hook" && failure.reason
+                        ? t(`hookFixes.${failure.reason}`)
+                        : t(`harnessFixes.${failure.error}`);
+                    return (
+                      <View key={`${failure.step}-${index}`} style={styles.stack}>
+                        <Text style={styles.detailLabel}>{t("detailStep")}</Text>
+                        <Text style={styles.text}>{t(`setupSteps.${failure.step}`, { file })}</Text>
+                        <Text style={styles.detailLabel}>{t("detailReason")}</Text>
+                        <Text style={styles.text}>{reason}</Text>
+                        {failure.output && failure.output.length > 0 ? (
+                          <>
+                            <Text style={styles.detailLabel}>{t("detailOutput")}</Text>
+                            <Text selectable style={styles.code}>
+                              {failure.output.join("\n")}
+                            </Text>
+                          </>
+                        ) : failure.step === "hook" && (failure.reason === "exit" || failure.reason === "timeout") ? (
+                          <Text style={styles.muted}>{t("hookOutputGone")}</Text>
+                        ) : null}
+                        <Text style={styles.detailLabel}>{t("detailFix")}</Text>
+                        <Text style={styles.text}>{fix}</Text>
+                      </View>
+                    );
+                  })}
+                </View>
+              ) : null}
+              {item.state !== "configured" ? (
+                <View style={styles.row}>
+                  <Button
+                    label={item.error === "installer_failed" ? t("installHook") : t("tryAgain")}
+                    onPress={() => void actions.installHook(item.id)}
+                    styles={styles}
+                    disabled={locked}
+                  />
+                  {!queued && item.failures && item.failures.length > 0 ? (
+                    <TextLink label={t("copyDetails")} onPress={() => void copy(item)} styles={styles} />
+                  ) : null}
+                </View>
+              ) : null}
+            </View>
+          </SettingsRow>
+        );
+      })}
       {!setup.running && !setup.error ? <Text style={styles.muted}>{t("setupLater")}</Text> : null}
     </View>
   );
@@ -362,7 +487,7 @@ function ConnectedCard({
         <Text style={styles.error}>{t(`errors.${status.lastError}`)}</Text>
       ) : null}
       <McpSwitch styles={styles} />
-      {status.setup ? <SetupSummary setup={status.setup} styles={styles} /> : null}
+      {status.setup ? <SetupSummary setup={status.setup} actions={actions} styles={styles} /> : null}
       <TextLink label={t("logout")} onPress={logout} styles={styles} />
     </View>
   );
@@ -484,6 +609,7 @@ export function AccountScreen({ theme, layout }: PluginSurfaceProps) {
   const poll = useRpc(pollRpc);
   const login = useRpc(loginRpc);
   const logout = useRpc(logoutRpc);
+  const requestInstall = useRpc(installHookRpc);
   const [busy, setBusy] = useState(false);
   const [browserFailed, setBrowserFailed] = useState(false);
 
@@ -536,6 +662,18 @@ export function AccountScreen({ theme, layout }: PluginSurfaceProps) {
           setBusy(false);
         }
       },
+      async installHook(id) {
+        setBusy(true);
+        try {
+          const reply = await requestInstall({ id });
+          await store(reply.status);
+          if (!reply.accepted) toast.error(t("installRefused"));
+        } catch {
+          toast.error(t("errors.bad_response"));
+        } finally {
+          setBusy(false);
+        }
+      },
       async logout(force = false) {
         setBusy(true);
         try {
@@ -549,7 +687,7 @@ export function AccountScreen({ theme, layout }: PluginSurfaceProps) {
         }
       },
     }),
-    [busy, browserFailed, openBrowser, login, logout, store, toast, t],
+    [busy, browserFailed, openBrowser, login, logout, requestInstall, store, toast, t],
   );
 
   const refresh = useCallback(

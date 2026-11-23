@@ -118,6 +118,56 @@ describe("createInstallerRunner", () => {
     expect(result).toMatchObject({ ok: false, reason: "timeout" });
   });
 
+  it("returns redacted stderr and leaves stdout out of it", async () => {
+    script.body = [
+      "#!/usr/bin/env bash",
+      "echo STDOUT_MARKER_SHOULD_STAY_HIDDEN",
+      'echo "agent-memory install: bad $AGENT_MEMORY_KEY at $HOME/x" >&2',
+      "exit 1",
+      "",
+    ].join("\n");
+    const result = await runner()({
+      proxyOrigin: origin,
+      args: ["--client", "codex"],
+      paths,
+      key: KEY,
+      redact: [KEY],
+      signal: signal(),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.exitCode).toBe(1);
+    const shown = (result.output ?? []).join("\n");
+    expect(shown).toContain("***");
+    expect(shown).toContain("~/x");
+    expect(shown).not.toContain(KEY);
+    expect(shown).not.toContain("STDOUT_MARKER_SHOULD_STAY_HIDDEN");
+    expect(shown).not.toContain(dir);
+  });
+
+  it("redacts a key that arrives in two stderr writes", async () => {
+    script.body = [
+      "#!/usr/bin/env bash",
+      "printf '%s' \"${AGENT_MEMORY_KEY:0:8}\" >&2",
+      "sleep 0.2",
+      "printf '%s at %s/x\\n' \"${AGENT_MEMORY_KEY:8}\" \"$HOME\" >&2",
+      "exit 1",
+      "",
+    ].join("\n");
+    const result = await runner()({
+      proxyOrigin: origin,
+      args: [],
+      paths,
+      key: KEY,
+      redact: [KEY],
+      signal: signal(),
+    });
+    const shown = (result.output ?? []).join("\n");
+    expect(shown).toContain("***");
+    expect(shown).not.toContain(KEY);
+    expect(shown).not.toContain(KEY.slice(0, 8));
+    expect(shown).not.toContain(dir);
+  });
+
   it("stops a script when the plugin stops", async () => {
     script.body = "#!/usr/bin/env bash\nsleep 30\n";
     const controller = new AbortController();

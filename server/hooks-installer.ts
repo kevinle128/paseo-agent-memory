@@ -1,7 +1,9 @@
 import { spawn } from "node:child_process";
 import { delimiter } from "node:path";
 import { HTTP_TIMEOUT_MS } from "../shared/constants";
+import type { HookFailureReason } from "../shared/harness";
 import { searchDirs, type Paths } from "./harness-paths";
+import { rememberStderr, sanitizeOutput, STDERR_TAIL_BYTES } from "./installer-output";
 
 const MAX_SCRIPT_BYTES = 1024 * 1024;
 const MAX_OUTPUT_BYTES = 8 * 1024;
@@ -15,13 +17,17 @@ export interface InstallerRun {
   paths: Paths;
   /** Reaches the installer through its environment (antigravity reads it), never through its arguments. */
   key?: string;
+  /** Values removed from stderr before it is shown. Never placed in the environment or the arguments. */
+  redact?: string[];
   signal: AbortSignal;
 }
 
 export interface InstallerResult {
   ok: boolean;
-  reason?: "download" | "spawn" | "timeout" | "exit";
+  reason?: HookFailureReason;
   exitCode?: number | null;
+  /** Redacted stderr lines for the account screen. Never logged and never stored. */
+  output?: string[];
 }
 
 export type RunInstaller = (run: InstallerRun) => Promise<InstallerResult>;
@@ -109,9 +115,19 @@ export function createInstallerRunner(
         detached: true,
       });
       let settled = false;
-      let output = 0;
+      let counted = 0;
+      let stderr: Uint8Array = Buffer.alloc(0);
+      let stderrTruncated = false;
       let stopped = false;
       let reason: InstallerResult["reason"];
+      const failed = (result: Omit<InstallerResult, "ok" | "output">): InstallerResult => {
+        const output = sanitizeOutput(stderr, {
+          secrets: run.redact ?? [],
+          home: run.paths.home,
+          truncated: stderrTruncated,
+        });
+        return { ok: false, ...result, ...(output.length > 0 ? { output } : {}) };
+      };
       const finish = (result: InstallerResult) => {
         if (settled) return;
         settled = true;
@@ -133,22 +149,29 @@ export function createInstallerRunner(
         stop();
       }, opts.timeoutMs ?? INSTALLER_TIMEOUT_MS);
       run.signal.addEventListener("abort", stop, { once: true });
-      // The output is read to be counted and dropped: the installer prints paths, and a log line must not
-      // carry anything from it. Only the exit code is kept.
-      const drain = (chunk: Buffer) => {
-        output += chunk.length;
-        if (output > MAX_OUTPUT_BYTES * 64) stop();
+      // Stdout is counted and dropped. Stderr is kept only long enough to build a redacted excerpt for the
+      // account screen. A log line still carries nothing from either stream.
+      const count = (chunk: Buffer) => {
+        counted += chunk.length;
+        if (counted > MAX_OUTPUT_BYTES * 64) stop();
       };
-      child.stdout.on("data", drain);
-      child.stderr.on("data", drain);
-      child.on("error", () => finish({ ok: false, reason: "spawn" }));
+      child.stdout.on("data", count);
+      child.stderr.on("data", (chunk: Buffer) => {
+        count(chunk);
+        const next = rememberStderr(stderr, chunk, STDERR_TAIL_BYTES);
+        stderr = next.buffer;
+        if (next.truncated) stderrTruncated = true;
+      });
+      child.on("error", () => finish(failed({ reason: "spawn", exitCode: null })));
       // After a stop, a grandchild may keep the pipes open, so the exit of the script itself ends the run.
       child.on("exit", (code) => {
-        if (stopped) finish({ ok: false, reason: reason ?? "exit", exitCode: code });
+        if (stopped) finish(failed({ reason: reason ?? "exit", exitCode: code }));
       });
       child.on("close", (code) =>
         finish(
-          code === 0 ? { ok: true, exitCode: 0 } : { ok: false, reason: reason ?? "exit", exitCode: code },
+          code === 0
+            ? { ok: true, exitCode: 0 }
+            : failed({ reason: reason ?? "exit", exitCode: code }),
         ),
       );
       child.stdin.on("error", () => undefined);

@@ -44,12 +44,17 @@ describe("locale files", () => {
   });
 
   it("cover every harness, state, error and removal result the account screen can show", async () => {
-    const { HarnessId, HarnessState, HarnessErrorCode, SetupError, RemovalResult } = await import(
-      "../shared/harness"
-    );
+    const { HarnessId, HarnessState, HarnessErrorCode, SetupError, RemovalResult, SetupStep, HookFailureReason } =
+      await import("../shared/harness");
     for (const id of HarnessId.options) expect(english.has(`harness.${id}`), id).toBe(true);
     for (const state of HarnessState.options) expect(english.has(`harnessState.${state}`), state).toBe(true);
     for (const code of HarnessErrorCode.options) expect(english.has(`harnessErrors.${code}`), code).toBe(true);
+    for (const code of HarnessErrorCode.options) expect(english.has(`harnessFixes.${code}`), code).toBe(true);
+    for (const step of SetupStep.options) expect(english.has(`setupSteps.${step}`), step).toBe(true);
+    for (const reason of HookFailureReason.options) {
+      expect(english.has(`hookReasons.${reason}`), reason).toBe(true);
+      expect(english.has(`hookFixes.${reason}`), reason).toBe(true);
+    }
     for (const code of SetupError.options) expect(english.has(`setupErrors.${code}`), code).toBe(true);
     for (const result of RemovalResult.options) expect(english.has(`removalResults.${result}`), result).toBe(true);
   });

@@ -255,9 +255,11 @@ export function createInstallerRunner(
     env?: NodeJS.ProcessEnv;
     platform?: NodeJS.Platform;
     exists?: FileExists;
+    spawn?: typeof spawn;
   } = {},
 ): RunInstaller {
   const platform = opts.platform ?? process.platform;
+  const spawnProcess = opts.spawn ?? spawn;
   const baseEnv = opts.env ?? process.env;
   const exists = opts.exists ?? existsSync;
   return async (run) => {
@@ -266,11 +268,13 @@ export function createInstallerRunner(
     const script = await download(run.proxyOrigin, run.signal, opts.fetch ?? fetch);
     if (script === null) return { ok: false, reason: "download" };
     return new Promise<InstallerResult>((resolve) => {
-      const child = spawn(bash, ["-s", "--", ...run.args], {
+      const child = spawnProcess(bash, ["-s", "--", ...run.args], {
         env: installerEnv(run.paths, run.key, baseEnv, platform, bash),
         stdio: ["pipe", "pipe", "pipe"],
         // Its own process group, so a stop also ends what the script started (a sleeping `codex app-server`).
-        detached: true,
+        // Not on Windows: there taskkill /T ends the tree, and a detached process has no console, so every
+        // console program the script starts would open a visible window.
+        detached: platform !== "win32",
         windowsHide: true,
       });
       let settled = false;
@@ -304,7 +308,7 @@ export function createInstallerRunner(
             child.kill();
             return;
           }
-          const killer = spawn(taskkillExe(baseEnv), ["/PID", String(child.pid), "/T", "/F"], {
+          const killer = spawnProcess(taskkillExe(baseEnv), ["/PID", String(child.pid), "/T", "/F"], {
             windowsHide: true,
             stdio: "ignore",
           });
@@ -349,8 +353,9 @@ export function createInstallerRunner(
       });
       child.on("error", () => finish(failed({ reason: "spawn", exitCode: null })));
       // After a stop, a grandchild may keep the pipes open, so the exit of the script itself ends the run.
-      child.on("exit", (code) => {
-        if (stopped) finish(failed({ reason: reason ?? "exit", exitCode: code }));
+      // The code of a stopped run is dropped: taskkill /F leaves exit code 1 on Windows, not a signal.
+      child.on("exit", () => {
+        if (stopped) finish(failed({ reason: reason ?? "exit", exitCode: null }));
       });
       child.on("close", (code) =>
         finish(

@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
@@ -298,6 +299,73 @@ describe("createInstallerRunner", () => {
       exists: (file) => file.toLowerCase() === "c:\\windows\\system32\\bash.exe",
     })({ proxyOrigin: origin, args: [], paths, signal: signal() });
     expect(result).toEqual({ ok: false, reason: "spawn", exitCode: null });
+  });
+
+  describe("on Windows", () => {
+    const bashExe = "C:\\Program Files\\Git\\bin\\bash.exe";
+    const fakeSpawn = (taskkillCode: number | "error") => {
+      const calls: { file: string; args: string[]; options: Record<string, unknown> }[] = [];
+      const child = Object.assign(new EventEmitter(), {
+        pid: 4242,
+        stdout: new EventEmitter(),
+        stderr: new EventEmitter(),
+        stdin: Object.assign(new EventEmitter(), { end: () => undefined }),
+        kills: 0,
+        kill() {
+          child.kills += 1;
+          child.emit("exit", 1, null);
+          return true;
+        },
+      });
+      const spawnFn = ((file: string, args: string[], options: Record<string, unknown>) => {
+        calls.push({ file, args, options });
+        if (file === bashExe) return child;
+        const killer = Object.assign(new EventEmitter(), { unref: () => undefined });
+        setImmediate(() => {
+          if (taskkillCode === "error") killer.emit("error", new Error("ENOENT"));
+          else {
+            if (taskkillCode === 0) child.emit("exit", 1, null);
+            killer.emit("exit", taskkillCode, null);
+          }
+        });
+        return killer;
+      }) as unknown as NonNullable<Parameters<typeof createInstallerRunner>[0]>["spawn"];
+      return { calls, child, spawnFn };
+    };
+    const winRunner = (spawnFn: ReturnType<typeof fakeSpawn>["spawnFn"]) =>
+      createInstallerRunner({
+        platform: "win32",
+        env: { PATH: "C:\\Windows\\System32", SYSTEMROOT: "C:\\Windows" },
+        exists: (file) => file === bashExe,
+        spawn: spawnFn,
+      });
+
+    it("does not detach bash and ends a flooded run with one taskkill and no exit code", async () => {
+      script.body = "#!/usr/bin/env bash\nexit 0\n";
+      const fake = fakeSpawn(0);
+      const pending = winRunner(fake.spawnFn)({ proxyOrigin: origin, args: [], paths, signal: signal() });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const chunk = Buffer.alloc(64 * 1024);
+      for (let i = 0; i < 20; i += 1) fake.child.stdout.emit("data", chunk);
+      expect(await pending).toEqual({ ok: false, reason: "exit", exitCode: null });
+      expect(fake.calls[0].options.detached).toBe(false);
+      const taskkills = fake.calls.filter((call) => call.file !== bashExe);
+      expect(taskkills).toHaveLength(1);
+      expect(taskkills[0].file).toBe("C:\\Windows\\System32\\taskkill.exe");
+      expect(taskkills[0].args).toEqual(["/PID", "4242", "/T", "/F"]);
+      expect(fake.child.kills).toBe(0);
+    });
+
+    it.each([1, "error"] as const)("falls back to child.kill() when taskkill fails (%s)", async (outcome) => {
+      script.body = "#!/usr/bin/env bash\nexit 0\n";
+      const fake = fakeSpawn(outcome);
+      const controller = new AbortController();
+      const pending = winRunner(fake.spawnFn)({ proxyOrigin: origin, args: [], paths, signal: controller.signal });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      controller.abort();
+      expect(await pending).toEqual({ ok: false, reason: "exit", exitCode: null });
+      expect(fake.child.kills).toBe(1);
+    });
   });
 
   it("stops a script when the plugin stops", async () => {

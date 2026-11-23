@@ -864,9 +864,18 @@ describe("hook failure details", () => {
         id: "codex",
         state: "partial",
         error: "installer_failed",
-        failures: [{ step: "hook", error: "installer_failed", reason: "spawn", exitCode: null }],
+        failures: [{ step: "hook", error: "installer_failed", reason: "spawn", exitCode: null, output: [] }],
       },
     ]);
+  });
+
+  it("tells an installer that wrote nothing in this session apart from lines lost at a restart", async () => {
+    const { setup } = build(["codex"], {
+      runInstaller: async () => ({ ok: false, reason: "timeout", exitCode: null }),
+    });
+    setup.configure(credential());
+    await settled(setup);
+    expect(setup.view().setup?.harnesses[0].failures?.[0]).toMatchObject({ step: "hook", output: [] });
   });
 
   it("keeps both the MCP failure and the hook failure for agy", async () => {
@@ -998,6 +1007,39 @@ describe("install one client", () => {
     await vi.waitFor(() => expect(setup.view().setup?.harnesses[0].state).toBe("configured"));
     await (await setup.beginRemoval()).done;
     await expect(stat(agyMcpFile())).rejects.toThrow();
+  });
+
+  it("retries only the agy MCP step when the hook is already in place", async () => {
+    await mkdir(join(home, ".gemini", "config"), { recursive: true });
+    await writeFile(agyMcpFile(), "{broken");
+    const { setup, store } = build(["agy"]);
+    setup.configure(credential());
+    await settled(setup);
+    expect(setup.view().setup?.harnesses[0]).toMatchObject({ state: "partial", error: "settings_invalid" });
+    const before = installs.length;
+    // The installer is down now: a retry that ran it again would turn agy failed.
+    installFails = () => true;
+    await writeFile(agyMcpFile(), "{}");
+    expect(setup.install(credential(), "agy")).toBe(true);
+    await vi.waitFor(() => expect(setup.view().setup?.harnesses[0].state).toBe("configured"));
+    expect(installs.length).toBe(before);
+    expect(JSON.parse(await readFile(agyMcpFile(), "utf8")).mcpServers["agent-memory"]).toBeDefined();
+    expect((await store.readHarness())?.harnesses[0]).toMatchObject({ id: "agy", mcpWritten: true });
+  });
+
+  it("keeps agy partial with its hook in place when the MCP retry fails again", async () => {
+    await mkdir(join(home, ".gemini", "config"), { recursive: true });
+    await writeFile(agyMcpFile(), "{broken");
+    const { setup } = build(["agy"]);
+    setup.configure(credential());
+    await settled(setup);
+    const before = installs.length;
+    expect(setup.install(credential(), "agy")).toBe(true);
+    await vi.waitFor(() => expect(setup.view().setup?.installing).toBeUndefined());
+    expect(installs.length).toBe(before);
+    expect(setup.view().setup?.harnesses).toEqual([
+      { id: "agy", state: "partial", error: "settings_invalid", failures: [{ step: "mcp", error: "settings_invalid" }] },
+    ]);
   });
 
   it("stops an install on log out and removes what it wrote", async () => {

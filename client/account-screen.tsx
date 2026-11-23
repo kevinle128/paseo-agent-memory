@@ -252,7 +252,9 @@ function SetupSummary({
                               {failure.output.join("\n")}
                             </Text>
                           </>
-                        ) : failure.step === "hook" && (failure.reason === "exit" || failure.reason === "timeout") ? (
+                        ) : failure.output === undefined &&
+                          failure.step === "hook" &&
+                          (failure.reason === "exit" || failure.reason === "timeout") ? (
                           <Text style={styles.muted}>{t("hookOutputGone")}</Text>
                         ) : null}
                         <Text style={styles.detailLabel}>{t("detailFix")}</Text>

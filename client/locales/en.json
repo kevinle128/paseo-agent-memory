@@ -94,7 +94,7 @@
   },
   "hookFixes": {
     "download": "Check that this machine can reach the proxy (tailnet on), then press Install hook.",
-    "spawn": "Install Git for Windows so that bash is available, then press Install hook.",
+    "spawn": "Install Git for Windows so bash is available. If Git is already installed and bash still cannot be started, bash is not in a standard location (Program Files\\Git\\bin, Program Files (x86)\\Git\\bin, or %LOCALAPPDATA%\\Programs\\Git\\bin). Then press Install hook.",
     "timeout": "Press Install hook again. If it stops again, copy the details and send them to support.",
     "exit": "Read the last lines above. Fix what they name, then press Install hook. Otherwise, copy the details and send them to support."
   },

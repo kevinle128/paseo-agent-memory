@@ -94,7 +94,7 @@
   },
   "hookFixes": {
     "download": "Hãy kiểm tra máy này tới được proxy (bật tailnet), rồi bấm Cài hook.",
-    "spawn": "Hãy cài Git cho Windows để có bash, rồi bấm Cài hook.",
+    "spawn": "Hãy cài Git cho Windows để có bash. Nếu Git đã có mà vẫn không khởi động được bash, thì bash không nằm ở vị trí chuẩn (Program Files\\Git\\bin, Program Files (x86)\\Git\\bin, hoặc %LOCALAPPDATA%\\Programs\\Git\\bin). Sau đó bấm Cài hook.",
     "timeout": "Hãy bấm Cài hook lần nữa. Nếu vẫn bị dừng, hãy chép chi tiết và gửi cho người hỗ trợ.",
     "exit": "Hãy đọc các dòng cuối ở trên. Sửa đúng chỗ chúng chỉ ra, rồi bấm Cài hook. Nếu không, hãy chép chi tiết và gửi cho người hỗ trợ."
   },

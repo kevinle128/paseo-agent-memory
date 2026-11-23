@@ -30,7 +30,9 @@
   "renewBanner": "Phiên đăng nhập hết hạn ngày {{date}}. Đăng nhập lại để gia hạn thêm 7 ngày.",
   "renewBtn": "Đăng nhập lại",
   "copied": "Đã sao chép đường dẫn",
+  "detailsCopied": "Đã chép chi tiết",
   "copyFailed": "Không sao chép được. Hãy chọn đường dẫn và sao chép.",
+  "detailsCopyFailed": "Không sao chép được chi tiết. Hãy chọn đoạn văn bản và sao chép.",
   "logoutUnreachable": "Không kết nối được Agent-Memory. Nếu xóa đăng nhập khỏi máy này, key vẫn còn hiệu lực đến {{date}}.",
   "removeAnyway": "Xóa khỏi máy này",
   "connTitle": "Kết nối",
@@ -40,6 +42,16 @@
   "deviceNameHint": "Để trống để dùng tên của máy này.",
   "instanceId": "Instance ID",
   "tryAgain": "Thử lại",
+  "installHook": "Cài hook",
+  "installing": "Đang cài hook... Việc này có thể mất tới 90 giây.",
+  "installWaiting": "Đang chờ một công cụ khác cài xong.",
+  "installRefused": "Không bắt đầu cài được. Hãy đợi việc hiện tại kết thúc rồi thử lại.",
+  "copyDetails": "Chép chi tiết",
+  "detailStep": "Bước bị lỗi",
+  "detailReason": "Lý do",
+  "detailOutput": "Các dòng cuối của lỗi (đã che khóa)",
+  "detailFix": "Cách sửa",
+  "hookOutputGone": "Bấm Cài hook để xem lại các dòng lỗi.",
   "reload": "Tải lại",
   "restoreDefaults": "Khôi phục cài đặt mặc định",
   "reset": "Đặt lại",
@@ -68,6 +80,34 @@
     "failed": "Chưa cấu hình"
   },
   "harnessStateAgyPartial": "Đã cấu hình hook. Chưa thêm mục MCP agent-memory vào cấu hình agy.",
+  "setupSteps": {
+    "config": "Cấu hình client ({{file}})",
+    "mcp": "Cấu hình MCP của agy",
+    "hook": "Trình cài hook dự án"
+  },
+  "hookReasons": {
+    "killed": "Trình cài đặt bị dừng trước khi chạy xong.",
+    "download": "Không tải được trình cài từ proxy Agent-Memory (/setup/hooks.sh).",
+    "spawn": "Không khởi động được bash (spawn).",
+    "timeout": "Trình cài bị dừng sau 90 giây.",
+    "exit": "Trình cài dừng với mã thoát {{code}}."
+  },
+  "hookFixes": {
+    "download": "Hãy kiểm tra máy này tới được proxy (bật tailnet), rồi bấm Cài hook.",
+    "spawn": "Hãy cài Git cho Windows để có bash, rồi bấm Cài hook.",
+    "timeout": "Hãy bấm Cài hook lần nữa. Nếu vẫn bị dừng, hãy chép chi tiết và gửi cho người hỗ trợ.",
+    "exit": "Hãy đọc các dòng cuối ở trên. Sửa đúng chỗ chúng chỉ ra, rồi bấm Cài hook. Nếu không, hãy chép chi tiết và gửi cho người hỗ trợ."
+  },
+  "harnessFixes": {
+    "settings_invalid": "Sửa JSON trong tệp, rồi bấm Thử lại.",
+    "codex_profile": "Bỏ phần chọn profile trong cấu hình Codex, rồi bấm Thử lại.",
+    "models_invalid": "Sửa tệp models của omp để có thể chỉnh an toàn, rồi bấm Thử lại.",
+    "own_provider": "Bỏ nhà cung cấp riêng nếu bạn muốn dùng Agent-Memory, rồi bấm Thử lại.",
+    "toml_unsupported": "Đơn giản hóa bảng model_providers trong cấu hình Codex, rồi bấm Thử lại.",
+    "no_models": "Kiểm tra Agent-Memory có liệt kê model cho key này, rồi bấm Thử lại.",
+    "write_failed": "Kiểm tra tệp ghi được, rồi bấm Thử lại.",
+    "installer_failed": "Bấm Cài hook để chạy lại trình cài."
+  },
   "harnessErrors": {
     "settings_invalid": "Tệp cài đặt không phải JSON hợp lệ nên được giữ nguyên.",
     "codex_profile": "Cấu hình Codex chọn một profile nên được giữ nguyên.",

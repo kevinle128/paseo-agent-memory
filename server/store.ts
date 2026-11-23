@@ -2,7 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 import { chmod, open, readFile, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
-import { HarnessErrorCode, HarnessId, HarnessState, SetupError } from "../shared/harness";
+import { HarnessErrorCode, HarnessFailure, HarnessId, HarnessState, SetupError } from "../shared/harness";
 
 const InstallFile = z.object({
   version: z.literal(1),
@@ -40,8 +40,9 @@ const PendingFile = z.object({
 });
 export type PendingFile = z.infer<typeof PendingFile>;
 
-// What the plugin set up for one key. It holds no secret: removal recognises the plugin's own entries by a
-// digest of the key. `removalPending` stays until a removal has finished, so a restart resumes it.
+// What the plugin set up for one key. It holds no secret and none of the installer's output: removal
+// recognises the plugin's own entries by a digest of the key. `removalPending` stays until a removal has
+// finished, so a restart resumes it. `failures` stores only the step and the short error code.
 const HarnessFile = z.object({
   version: z.literal(1),
   keyId: z.string(),
@@ -67,6 +68,7 @@ const HarnessFile = z.object({
       // did not exist before, so the removal may delete it when nothing else is left in it.
       mcpWritten: z.boolean().optional(),
       mcpCreated: z.boolean().optional(),
+      failures: z.array(HarnessFailure).optional(),
     }),
   ),
 });

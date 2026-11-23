@@ -1,5 +1,6 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
+import { HarnessId } from "./harness";
 import { AccountStatus } from "./status";
 
 const empty = z.object({});
@@ -11,4 +12,9 @@ export const logoutRpc = defineRpc({
   name: "account.logout",
   input: z.object({ force: z.boolean().optional() }),
   output: AccountStatus,
+});
+export const installHookRpc = defineRpc({
+  name: "account.installHook",
+  input: z.object({ id: HarnessId }),
+  output: z.object({ accepted: z.boolean(), status: AccountStatus }),
 });

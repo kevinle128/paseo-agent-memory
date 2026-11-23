@@ -59,8 +59,13 @@ moment. It gives the same result as the Agent-Memory Guide page and `setup/hooks
 - **Key handling.** The key is never put in a process argument. The installer gets it only for
   Antigravity, in `AGENT_MEMORY_KEY`. Claude Code, Codex and omp keep the key in their own config
   file, as the manual flow does (those files are the user's, outside the plugin data directory).
-- **Record.** `<plugin data dir>/harness.json` (no key) lists what was set up; the account screen
-  shows it. A tool installed later is not set up automatically: follow the Guide steps for it.
+  When a hook install fails, the account screen can show the last lines of the installer's error
+  after the key, tokens and the home directory have been removed. Those lines stay in the plugin
+  process only. They are not written to the plugin log.
+- **Record.** `<plugin data dir>/harness.json` (no key, no installer output) lists what was set up,
+  including the step and short error code when a client did not finish. The account screen shows it.
+  A tool that is not fully set up has Install hook or Try again, which runs that tool again.
+  A tool installed later is not set up automatically: follow the Guide steps for it.
 - **Log out.** After the server accepts the log out, the plugin removes what it added: the entries
   above and the project hook (installer `--uninstall`). An entry the user changed since is kept and
   shown on the screen. Backups are not restored and are not deleted. If the installer cannot be

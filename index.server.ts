@@ -2,7 +2,7 @@ import { hostname } from "node:os";
 import type { PluginServerContext, PluginSettingsState } from "@getpaseo/plugin/server";
 import { parseBaseUrl } from "./shared/base-url";
 import { PLACEHOLDER_ORIGIN } from "./shared/constants";
-import { logoutRpc, loginRpc, pollRpc, statusRpc } from "./shared/rpc";
+import { installHookRpc, logoutRpc, loginRpc, pollRpc, statusRpc } from "./shared/rpc";
 import { connection, mcp } from "./shared/settings";
 import { mcpEnabled } from "./shared/view";
 import { ensureDataDir, resolveDataDir } from "./server/data-dir";
@@ -116,6 +116,10 @@ export default function contribute(server: PluginServerContext) {
   server.handle(logoutRpc, async ({ force }) => {
     await ready();
     return machine.logout(force ?? false);
+  });
+  server.handle(installHookRpc, async ({ id }) => {
+    await ready();
+    return machine.installHook(id);
   });
 
   return () => {

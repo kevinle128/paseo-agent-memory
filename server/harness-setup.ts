@@ -6,7 +6,9 @@ import { mcpUrl } from "../shared/mcp-entry";
 import {
   INSTALLER_CLIENT,
   type HarnessErrorCode,
+  type HarnessFailure,
   type HarnessId,
+  type HarnessState,
   type RemovalView,
   type SetupView,
 } from "../shared/harness";
@@ -177,15 +179,94 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
 
   // Setups that are queued or running. A log out aborts all of them: each stops at its next step.
   const setups = new Set<AbortController>();
+  // Redacted stderr for the account screen. Kept in memory only, never written to the record or the log.
+  const outputs = new Map<HarnessId, string[]>();
+  // Installs queued or running, in the order they were asked for. The first one is in progress.
+  const pending: HarnessId[] = [];
+
+  type SetupCtx = {
+    proxyOrigin: string;
+    panelOrigin: string;
+    instanceId: string;
+    key: string;
+    agyMcpCreated: boolean;
+  };
+
+  async function installHook(
+    id: HarnessId,
+    route: string,
+    ctx: SetupCtx,
+    signal: AbortSignal,
+    mcp: { mcpWritten?: boolean; mcpCreated?: boolean } | undefined,
+    failures: HarnessFailure[],
+    stateOnHookFailure: HarnessState,
+  ): Promise<HarnessFile["harnesses"][number]> {
+    outputs.delete(id);
+    const hook = await deps.runInstaller({
+      proxyOrigin: ctx.proxyOrigin,
+      args: ["--client", INSTALLER_CLIENT[id], "--base-url", route],
+      paths: deps.paths,
+      key: id === "agy" ? ctx.key : undefined,
+      redact: [ctx.key],
+      signal,
+    });
+    const base = { id, route, ...mcp };
+    if (hook.ok) {
+      return failures.length > 0
+        ? { ...base, state: "partial", error: failures[0].error, failures }
+        : { ...base, state: "configured" };
+    }
+    const reason = hook.reason ?? "exit";
+    const exitCode = hook.exitCode ?? null;
+    console.error(`harness ${id} hook not installed (${reason} ${exitCode ?? ""})`.trim());
+    failures.push({ step: "hook", error: "installer_failed", reason, exitCode });
+    // An empty list means the installer ran in this session and wrote nothing; no entry means the lines are lost.
+    outputs.set(id, hook.output ?? []);
+    return { ...base, state: stateOnHookFailure, error: failures[0].error, failures };
+  }
+
+  /** Writes the Antigravity MCP entry. It is recorded (`record`) before it is written. */
+  async function writeAgyMcp(
+    ctx: SetupCtx,
+    record: (mcp: { mcpWritten: boolean; mcpCreated: boolean }) => Promise<void>,
+  ): Promise<{ mcp: { mcpWritten: boolean; mcpCreated: boolean }; error?: HarnessErrorCode }> {
+    const file = agyMcpFile(deps.paths);
+    const existed = await stat(file).then(() => true, (error: NodeJS.ErrnoException) => error.code !== "ENOENT");
+    // A setup for a new key finds the file an earlier setup created, which stays the plugin's to delete.
+    const mcp = { mcpWritten: true, mcpCreated: !existed || ctx.agyMcpCreated };
+    await record(mcp);
+    try {
+      await applyAgyMcp(file, mcpUrl(ctx.panelOrigin), ctx.instanceId, ctx.key, deps.now());
+      return { mcp };
+    } catch (error) {
+      const mcpError: HarnessErrorCode = error instanceof SetupFailure ? error.code : "write_failed";
+      // The write is atomic, so a failed step wrote nothing and the removal has nothing to look for.
+      console.error(`harness agy mcp not configured (${mcpError})`);
+      return { mcp: { mcpWritten: false, mcpCreated: false }, error: mcpError };
+    }
+  }
+
+  /** Runs the Antigravity MCP step again for an entry whose installer already finished. */
+  async function retryAgyMcp(
+    prev: HarnessFile["harnesses"][number],
+    ctx: SetupCtx,
+    commit: (entry: HarnessFile["harnesses"][number]) => Promise<void>,
+  ): Promise<HarnessFile["harnesses"][number]> {
+    const { route } = prev;
+    const step = await writeAgyMcp(ctx, (mcp) => commit({ id: "agy", state: "partial", error: prev.error, route, ...mcp }));
+    if (!step.error) return { id: "agy", state: "configured", route, ...step.mcp };
+    return { id: "agy", state: "partial", error: step.error, route, ...step.mcp, failures: [{ step: "mcp", error: step.error }] };
+  }
 
   async function configureOne(
     id: HarnessId,
-    ctx: { proxyOrigin: string; panelOrigin: string; instanceId: string; key: string; agyMcpCreated: boolean },
+    ctx: SetupCtx,
     signal: AbortSignal,
     commit: (entry: HarnessFile["harnesses"][number]) => Promise<void>,
   ): Promise<HarnessFile["harnesses"][number]> {
-    const client = INSTALLER_CLIENT[id];
-    const route = `${ctx.proxyOrigin}/${client}/${ctx.instanceId}`;
+    outputs.delete(id);
+    const route = `${ctx.proxyOrigin}/${INSTALLER_CLIENT[id]}/${ctx.instanceId}`;
+    const failures: HarnessFailure[] = [];
     try {
       if (id === "claude") {
         await applyClaude(claudeSettingsFile(deps.paths), route, ctx.key, deps.now());
@@ -205,45 +286,22 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
     } catch (error) {
       const code: HarnessErrorCode = error instanceof SetupFailure ? error.code : "write_failed";
       console.error(`harness ${id} not configured (${code})`);
-      return { id, state: "failed", error: code, route };
+      failures.push({ step: "config", error: code });
+      return { id, state: "failed", error: code, route, failures };
     }
     // Antigravity has no provider step; its MCP entry is the only file written before the installer.
     // It is recorded before it is written, so a crash or a log out never leaves it without a record.
     // A failed MCP step leaves the client usable, so it only downgrades the result to partial.
-    let mcpError: HarnessErrorCode | undefined;
     let mcp: { mcpWritten: boolean; mcpCreated: boolean } | undefined;
     if (id === "agy") {
-      const file = agyMcpFile(deps.paths);
-      const existed = await stat(file).then(() => true, (error: NodeJS.ErrnoException) => error.code !== "ENOENT");
-      // A setup for a new key finds the file an earlier setup created, which stays the plugin's to delete.
-      mcp = { mcpWritten: true, mcpCreated: !existed || ctx.agyMcpCreated };
-      await commit({ id, state: "partial", route, ...mcp });
-      try {
-        await applyAgyMcp(file, mcpUrl(ctx.panelOrigin), ctx.instanceId, ctx.key, deps.now());
-      } catch (error) {
-        mcpError = error instanceof SetupFailure ? error.code : "write_failed";
-        // The write is atomic, so a failed step wrote nothing and the removal has nothing to look for.
-        mcp = { mcpWritten: false, mcpCreated: false };
-        console.error(`harness agy mcp not configured (${mcpError})`);
-      }
+      const step = await writeAgyMcp(ctx, (pending) => commit({ id, state: "partial", route, ...pending }));
+      mcp = step.mcp;
+      if (step.error) failures.push({ step: "mcp", error: step.error });
     } else {
       // The provider is on disk now, so it is recorded before the installer runs.
       await commit({ id, state: "partial", route });
     }
-    const hook = await deps.runInstaller({
-      proxyOrigin: ctx.proxyOrigin,
-      args: ["--client", client, "--base-url", route],
-      paths: deps.paths,
-      key: id === "agy" ? ctx.key : undefined,
-      signal,
-    });
-    if (hook.ok) {
-      return mcpError
-        ? { id, state: "partial", error: mcpError, route, ...mcp }
-        : { id, state: "configured", route, ...mcp };
-    }
-    console.error(`harness ${id} hook not installed (${hook.reason ?? "exit"} ${hook.exitCode ?? ""})`.trim());
-    return { id, state: id === "agy" ? "failed" : "partial", error: "installer_failed", route, ...mcp };
+    return installHook(id, route, ctx, signal, mcp, failures, id === "agy" ? "failed" : "partial");
   }
 
   async function doConfigure(credential: CredentialFile, abort: AbortController): Promise<void> {
@@ -255,6 +313,7 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
     else deps.signal.addEventListener("abort", stopWithPlugin, { once: true });
     const signal = abort.signal;
     running = true;
+    outputs.clear();
     removal = undefined;
     const previous = record ?? (await deps.store.readHarness().catch(() => null));
     const agyMcpCreated =
@@ -306,7 +365,9 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
         if (signal.aborted) break;
         await commit(await configureOne(id, ctx, signal, commit));
       }
-      console.log(`harness setup done (${current.harnesses.map((h) => `${h.id}:${h.state}`).join(" ") || "none found"})`);
+      console.log(
+        `harness setup done (${current.harnesses.map((h) => `${h.id}:${h.state}`).join(" ") || "none found"}) platform=${process.platform}`,
+      );
     } finally {
       deps.signal.removeEventListener("abort", stopWithPlugin);
       running = false;
@@ -379,6 +440,7 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
     } finally {
       clearTimeout(timer);
       deps.signal.removeEventListener("abort", stop);
+      outputs.clear();
     }
     // The plugin is stopping: the record and its marker stay, so the next start resumes the removal.
     if (deps.signal.aborted) return;
@@ -403,6 +465,85 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
       .finally(() => {
         removals -= 1;
       });
+  }
+
+  function samePaths(saved: HarnessFile["paths"]): boolean {
+    return (
+      saved.home === deps.paths.home &&
+      saved.shell === deps.paths.shell &&
+      saved.codexHome === deps.paths.codexHome &&
+      saved.ompDir === deps.paths.ompDir
+    );
+  }
+
+  async function doInstall(credential: CredentialFile, id: HarnessId, abort: AbortController): Promise<void> {
+    if (abort.signal.aborted) return;
+    const stopWithPlugin = () => abort.abort();
+    if (deps.signal.aborted) stopWithPlugin();
+    else deps.signal.addEventListener("abort", stopWithPlugin, { once: true });
+    let started = false;
+    try {
+      const rec = record ?? (await deps.store.readHarness().catch(() => null));
+      const skip = (why: string) => {
+        console.error(`harness ${id} install skipped (${why})`);
+      };
+      if (!rec) return skip("no record");
+      if (rec.keyDigest !== keyDigest(credential.key)) return skip("key");
+      if (rec.removalPending) return skip("removal");
+      if (rec.error) return skip("error");
+      if (!samePaths(rec.paths)) return skip("paths");
+      if (!(await deps.detect(deps.paths)).includes(id)) return skip("not detected");
+      if (abort.signal.aborted) return;
+
+      started = true;
+      running = true;
+      outputs.delete(id);
+      record = rec;
+      const current = rec;
+      const commit = async (entry: HarnessFile["harnesses"][number]) => {
+        const index = current.harnesses.findIndex((item) => item.id === entry.id);
+        current.harnesses =
+          index >= 0
+            ? current.harnesses.map((item, at) => (at === index ? entry : item))
+            : [...current.harnesses, entry];
+        record = current;
+        await save();
+      };
+      const prev = current.harnesses.find((item) => item.id === id);
+      const agy = current.harnesses.find((item) => item.id === "agy");
+      const ctx: SetupCtx = {
+        proxyOrigin: rec.proxyOrigin,
+        panelOrigin: credential.origin,
+        instanceId: rec.instanceId,
+        key: credential.key,
+        agyMcpCreated: agy?.mcpWritten === true && agy.mcpCreated === true,
+      };
+      // A client whose provider is already on disk only runs the hook, so a failed retry cannot turn a
+      // removable entry into one that log out skips. A missing entry, or a failed write, runs the whole setup.
+      const providerInPlace = !!prev && (prev.id === "agy" ? prev.mcpWritten === true : prev.state !== "failed");
+      // Antigravity `partial` with an error: the installer finished and only the MCP entry failed. Only the MCP
+      // step runs again, so the URL file the gateway env relies on stays recorded as written.
+      const agyHookInPlace =
+        !!prev && prev.id === "agy" && prev.state === "partial" && prev.error !== undefined && prev.mcpWritten !== true;
+      const entry = agyHookInPlace
+        ? await retryAgyMcp(prev, ctx, commit)
+        : providerInPlace
+        ? await installHook(
+            id,
+            prev.route,
+            ctx,
+            abort.signal,
+            prev.mcpWritten === undefined ? undefined : { mcpWritten: prev.mcpWritten, mcpCreated: prev.mcpCreated === true },
+            [],
+            prev.state === "failed" ? "failed" : "partial",
+          )
+        : await configureOne(id, ctx, abort.signal, commit);
+      await commit(entry);
+      if (!abort.signal.aborted) console.log(`harness ${id} install done (${entry.state})`);
+    } finally {
+      deps.signal.removeEventListener("abort", stopWithPlugin);
+      if (started) running = false;
+    }
   }
 
   async function removeEntries(
@@ -436,6 +577,34 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
     /** The key id of the removal resumed by `init`, if any. */
     resumedRemovalKeyId(): string | undefined {
       return resumedKeyId;
+    },
+
+    /**
+     * Runs the setup again for one client. Returns false at once when a removal is in progress or this client
+     * is already queued. The job itself may still skip (another key, a client that is not installed).
+     */
+    install(credential: CredentialFile, id: HarnessId): boolean {
+      if (removals > 0) {
+        console.error(`harness ${id} install refused (removal)`);
+        return false;
+      }
+      if (pending.includes(id)) {
+        console.error(`harness ${id} install refused (queued)`);
+        return false;
+      }
+      const abort = new AbortController();
+      setups.add(abort);
+      pending.push(id);
+      void serial(() => doInstall(credential, id, abort))
+        .catch(() => {
+          console.error("harness install failed");
+        })
+        .finally(() => {
+          const at = pending.indexOf(id);
+          if (at >= 0) pending.splice(at, 1);
+          setups.delete(abort);
+        });
+      return true;
     },
 
     /** Starts the one-time setup for a newly issued key. It never throws and does not block the login. */
@@ -484,10 +653,19 @@ export function createHarnessSetup(deps: HarnessSetupDeps) {
           configuredAt: record.configuredAt,
           ...(running ? { running: true } : {}),
           ...(record.error ? { error: record.error } : {}),
-          harnesses: record.harnesses.map(({ id, state, error }) => ({
+          ...(pending.length > 0 ? { installing: [...pending] } : {}),
+          harnesses: record.harnesses.map(({ id, state, error, failures }) => ({
             id,
             state,
             ...(error ? { error } : {}),
+            ...(failures && failures.length > 0
+              ? {
+                  failures: failures.map((failure) => {
+                    const output = failure.step === "hook" ? outputs.get(id) : undefined;
+                    return output !== undefined ? { ...failure, output } : failure;
+                  }),
+                }
+              : {}),
           })),
         };
       }

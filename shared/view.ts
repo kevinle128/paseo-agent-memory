@@ -29,6 +29,7 @@ export function screenFor(status: AccountStatus): ScreenName {
 }
 
 export function refetchIntervalFor(status: AccountStatus | undefined): number | false {
+  if (status?.setup?.running || status?.setup?.installing?.length || status?.removing) return 2_000;
   switch (status?.state) {
     case "waiting_browser":
       return 2_000;

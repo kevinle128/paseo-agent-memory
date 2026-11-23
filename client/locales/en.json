@@ -30,7 +30,9 @@
   "renewBanner": "Your login ends on {{date}}. Log in again to keep it for 7 more days.",
   "renewBtn": "Log in again",
   "copied": "Link copied",
+  "detailsCopied": "Details copied",
   "copyFailed": "Could not copy. Select the link and copy it.",
+  "detailsCopyFailed": "Could not copy the details. Select the text and copy it.",
   "logoutUnreachable": "Could not reach Agent-Memory. If you remove the login from this machine, the key stays valid until {{date}}.",
   "removeAnyway": "Remove from this machine",
   "connTitle": "Connection",
@@ -40,6 +42,16 @@
   "deviceNameHint": "Leave empty to use this machine's name.",
   "instanceId": "Instance ID",
   "tryAgain": "Try again",
+  "installHook": "Install hook",
+  "installing": "Installing the hook... This can take up to 90 seconds.",
+  "installWaiting": "Waiting for another tool to finish.",
+  "installRefused": "The install could not start. Wait for the current task to end, then try again.",
+  "copyDetails": "Copy details",
+  "detailStep": "Step that failed",
+  "detailReason": "Reason",
+  "detailOutput": "Last lines of its error (key hidden)",
+  "detailFix": "How to fix",
+  "hookOutputGone": "Press Install hook to see the error lines again.",
   "reload": "Reload",
   "restoreDefaults": "Restore default settings",
   "reset": "Reset",
@@ -68,6 +80,34 @@
     "failed": "Not set up"
   },
   "harnessStateAgyPartial": "The hook is set up. The agent-memory MCP entry was not added to the agy config.",
+  "setupSteps": {
+    "config": "Client config ({{file}})",
+    "mcp": "agy MCP config",
+    "hook": "Project hook installer"
+  },
+  "hookReasons": {
+    "killed": "The installer was stopped before it finished.",
+    "download": "The installer could not be downloaded from the Agent-Memory proxy (/setup/hooks.sh).",
+    "spawn": "bash could not be started (spawn).",
+    "timeout": "The installer was stopped after 90 seconds.",
+    "exit": "The installer stopped with exit code {{code}}."
+  },
+  "hookFixes": {
+    "download": "Check that this machine can reach the proxy (tailnet on), then press Install hook.",
+    "spawn": "Install Git for Windows so that bash is available, then press Install hook.",
+    "timeout": "Press Install hook again. If it stops again, copy the details and send them to support.",
+    "exit": "Read the last lines above. Fix what they name, then press Install hook. Otherwise, copy the details and send them to support."
+  },
+  "harnessFixes": {
+    "settings_invalid": "Fix the JSON in the file, then press Try again.",
+    "codex_profile": "Remove the profile selection from the Codex config, then press Try again.",
+    "models_invalid": "Fix the omp models file so it can be edited safely, then press Try again.",
+    "own_provider": "Remove your own provider from the file if you want Agent-Memory, then press Try again.",
+    "toml_unsupported": "Simplify the model_providers table in the Codex config, then press Try again.",
+    "no_models": "Check that Agent-Memory lists models for this key, then press Try again.",
+    "write_failed": "Check that the file can be written, then press Try again.",
+    "installer_failed": "Press Install hook to run the installer again."
+  },
   "harnessErrors": {
     "settings_invalid": "The settings file is not valid JSON, so it was left as it is.",
     "codex_profile": "The Codex config selects a profile, so it was left as it is.",

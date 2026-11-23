@@ -31,6 +31,10 @@ describe("refetchIntervalFor", () => {
     expect(refetchIntervalFor(states.expired)).toBe(60_000);
     expect(refetchIntervalFor(states.signed_out)).toBe(false);
     expect(refetchIntervalFor(undefined)).toBe(false);
+    const setup = { configuredAt: "2026-01-01T00:00:00Z", harnesses: [] };
+    expect(refetchIntervalFor({ ...states.connected, setup: { ...setup, running: true } })).toBe(2_000);
+    expect(refetchIntervalFor({ ...states.connected, setup: { ...setup, installing: ["claude"] } })).toBe(2_000);
+    expect(refetchIntervalFor({ ...states.connected, removing: true })).toBe(2_000);
   });
 });
 

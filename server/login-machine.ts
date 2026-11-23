@@ -4,6 +4,7 @@ import {
   DEVICE_MAX_INTERVAL_S,
   DEVICE_SLOW_DOWN_STEP_S,
 } from "../shared/constants";
+import type { HarnessId } from "../shared/harness";
 import type { AccountStatus, ErrorCode, SignedOutReason } from "../shared/status";
 import { credentialMatchesOrigin, isRenewDue } from "../shared/view";
 import { ApiError, type ApprovedGrant, type DeviceApi } from "./device-api";
@@ -489,6 +490,19 @@ export function createLoginMachine(deps: MachineDeps) {
           if (!stopped) lastError = errorCodeFor(asApiError(raw));
         }
         return derive();
+      });
+    },
+
+    installHook(id: HarnessId): Promise<{ accepted: boolean; status: AccountStatus }> {
+      return serialize(async () => {
+        const settings = await deps.readSettings();
+        const connected =
+          credential !== null &&
+          credentialMatchesOrigin(settings.origin, credential.origin) &&
+          Date.parse(credential.expiresAt) > deps.now();
+        if (!connected || !credential) return { accepted: false, status: await derive() };
+        const accepted = deps.harness?.install(credential, id) ?? false;
+        return { accepted, status: await derive() };
       });
     },
 

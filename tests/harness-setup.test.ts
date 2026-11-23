@@ -368,7 +368,7 @@ describe("configure", () => {
         id: "codex",
         state: "partial",
         error: "installer_failed",
-        failures: [{ step: "hook", error: "installer_failed", reason: "exit", exitCode: 1 }],
+        failures: [{ step: "hook", error: "installer_failed", reason: "exit", exitCode: 1, output: [] }],
       },
     ]);
     expect(await readFile(codexFile(), "utf8")).toContain("team-proxy");
@@ -384,7 +384,7 @@ describe("configure", () => {
         id: "agy",
         state: "failed",
         error: "installer_failed",
-        failures: [{ step: "hook", error: "installer_failed", reason: "exit", exitCode: 1 }],
+        failures: [{ step: "hook", error: "installer_failed", reason: "exit", exitCode: 1, output: [] }],
       },
     ]);
   });

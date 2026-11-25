@@ -30,6 +30,8 @@ export interface MachineDeps {
   abort?(): void;
   /** Sets up and removes the client configuration. Absent in tests that only exercise the login. */
   harness?: HarnessSetup;
+  /** Best-effort folder scan after a login is stored. A failure must not reject the login. */
+  onConnected?: () => void | Promise<void>;
 }
 
 interface Attempt {
@@ -243,6 +245,16 @@ export function createLoginMachine(deps: MachineDeps) {
     console.log(`login approved (renewed=${grant.renewed}, key_id=${grant.key_id.slice(-4)})`);
     // A renewal keeps the key the clients already hold; only a newly issued key is set up.
     if (!grant.renewed) deps.harness?.configure(next);
+    try {
+      const started = deps.onConnected?.();
+      if (started && typeof started.then === "function") {
+        void started.catch(() => {
+          console.error("inventory scan failed (login)");
+        });
+      }
+    } catch {
+      console.error("inventory scan failed (login)");
+    }
   }
 
   async function pollAttempt(): Promise<void> {

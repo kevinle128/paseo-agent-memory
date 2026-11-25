@@ -67,6 +67,23 @@
   "mcpSwitch": "Bật MCP agent-memory",
   "mcpOn": "Các agent Claude Code, Codex và omp mở trong Paseo được gắn MCP agent-memory. Thay đổi có hiệu lực khi một agent được mở. Antigravity nhận MCP từ tệp cấu hình riêng của nó khi khóa được cấp, và công tắc này không đổi điều đó.",
   "mcpOff": "MCP agent-memory đang tắt.",
+  "localSkillsTitle": "Skill trên máy",
+  "localSkillsEmpty": "Không thấy thư mục skill nào trên máy này.",
+  "localSkillsRescan": "Quét lại",
+  "localSkillsScanning": "Đang quét thư mục skill...",
+  "localSkillsTool": "Công cụ",
+  "localSkillsSource": "Nguồn",
+  "inventorySources": {
+    "user": "Người dùng",
+    "project": "Dự án",
+    "third_party_plugin": "Plugin bên thứ ba"
+  },
+  "inventoryErrors": {
+    "auth_failed": "Không kết nối được Agent-Memory. Hãy đăng nhập lại.",
+    "network": "Không kết nối được Agent-Memory.",
+    "server_unavailable": "Agent-Memory tạm thời không sẵn sàng.",
+    "bad_response": "Agent-Memory trả về dữ liệu không đúng."
+  },
   "mcpInvalid": "MCP agent-memory đang tắt vì không đọc được cài đặt đã lưu. Hãy đặt lại để bật lại.",
   "harness": {
     "claude": "Claude Code",

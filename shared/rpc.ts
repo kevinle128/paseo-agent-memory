@@ -1,6 +1,7 @@
 import { defineRpc } from "@getpaseo/plugin";
 import { z } from "zod";
 import { HarnessId } from "./harness";
+import { LocalInventoryView } from "./inventory";
 import { AccountStatus } from "./status";
 
 const empty = z.object({});
@@ -17,4 +18,14 @@ export const installHookRpc = defineRpc({
   name: "account.install-hook",
   input: z.object({ id: HarnessId }),
   output: z.object({ accepted: z.boolean(), status: AccountStatus }),
+});
+export const inventoryListRpc = defineRpc({
+  name: "inventory.list",
+  input: empty,
+  output: LocalInventoryView,
+});
+export const inventoryRescanRpc = defineRpc({
+  name: "inventory.rescan",
+  input: empty,
+  output: LocalInventoryView,
 });

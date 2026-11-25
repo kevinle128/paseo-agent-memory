@@ -25,6 +25,7 @@ import { connection, mcp } from "../shared/settings";
 import type { AccountStatus } from "../shared/status";
 import { mcpEnabled, refetchIntervalFor } from "../shared/view";
 import { messages } from "./messages";
+import { LocalSkillsSection } from "./local-skills-section";
 
 const STATUS_KEY = ["account-status"];
 
@@ -447,16 +448,21 @@ function ConnectedCard({
   status,
   actions,
   styles,
+  theme,
 }: {
   status: Extract<AccountStatus, { state: "connected" }>;
   actions: Actions;
   styles: Styles;
+  theme: Theme;
 }) {
   const { t, locale } = useTranslation(messages);
   const date = new Date(status.expiresAt).toLocaleDateString(locale);
   const logout = useCallback(() => void actions.logout(), [actions]);
   const removeAnyway = useCallback(() => void actions.logout(true), [actions]);
   const teams = status.teams.map((team) => (team.role ? `${team.name} · ${team.role}` : team.name));
+  const conn = useSettings(connection);
+  const instanceId = conn.status === "ready" ? conn.values.instanceId : "";
+  const sessionKey = `${status.origin}\0${instanceId}\0${status.account.username}\0${status.account.email ?? ""}\0${status.deviceName}\0${status.expiresAt}`;
   return (
     <View style={styles.card}>
       <Text style={styles.title}>{t("okTitle")}</Text>
@@ -490,6 +496,7 @@ function ConnectedCard({
       ) : null}
       <McpSwitch styles={styles} />
       {status.setup ? <SetupSummary setup={status.setup} actions={actions} styles={styles} /> : null}
+      <LocalSkillsSection theme={theme} sessionKey={sessionKey} />
       <TextLink label={t("logout")} onPress={logout} styles={styles} />
     </View>
   );
@@ -681,6 +688,7 @@ export function AccountScreen({ theme, layout }: PluginSurfaceProps) {
         try {
           const next = await logout({ force });
           setBrowserFailed(false);
+          queryClient.removeQueries({ queryKey: ["local-inventory"] });
           await store(next);
         } catch {
           toast.error(t("errors.bad_response"));
@@ -689,13 +697,14 @@ export function AccountScreen({ theme, layout }: PluginSurfaceProps) {
         }
       },
     }),
-    [busy, browserFailed, openBrowser, login, logout, requestInstall, store, toast, t],
+    [busy, browserFailed, openBrowser, login, logout, queryClient, requestInstall, store, toast, t],
   );
 
-  const refresh = useCallback(
-    () => void queryClient.invalidateQueries({ queryKey: STATUS_KEY }),
-    [queryClient],
-  );
+  const refresh = useCallback(() => {
+    queryClient.removeQueries({ queryKey: ["local-inventory"] });
+    void queryClient.invalidateQueries({ queryKey: STATUS_KEY });
+    void queryClient.invalidateQueries({ queryKey: ["local-inventory"] });
+  }, [queryClient]);
 
   const status = query.data;
   let card = null;
@@ -708,7 +717,7 @@ export function AccountScreen({ theme, layout }: PluginSurfaceProps) {
         card = <PendingCard status={status} actions={actions} styles={styles} />;
         break;
       case "connected":
-        card = <ConnectedCard status={status} actions={actions} styles={styles} />;
+        card = <ConnectedCard status={status} actions={actions} styles={styles} theme={theme} />;
         break;
       default:
         card = <LoginCard status={status} actions={actions} styles={styles} />;

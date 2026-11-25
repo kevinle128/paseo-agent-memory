@@ -158,6 +158,17 @@ describe("inventory sync", () => {
         relative_path: "/Users/hidden/SKILL.md",
         content_hash: sha("nope"),
       }),
+      {
+        ...row(installId, {
+          inventory_id: 5,
+          name: "removed-skill",
+          source: "user",
+          root_kind: "claude_user",
+          relative_path: "removed-skill/SKILL.md",
+          content_hash: sha("removed"),
+        }),
+        present: 0,
+      },
     ];
     panel.queue("inventory-replace", { body: { code: 0, message: "ok", data: { machine_id: installId, count: 3 } } });
     panel.queue("inventory-list", { body: { code: 0, message: "ok", data: { items: rows } } });
@@ -236,6 +247,7 @@ describe("inventory sync", () => {
     expect(first).toMatchObject({ state: "connected", items: [expect.objectContaining({ name: "user-a" })] });
 
     await store.deleteCredential();
+    expect(await sync.list([workspace])).toEqual({ state: "signed_out" });
     await store.writeCredential(credential(installId, "2099-01-01T00:00:00.000Z", {
       keyId: "key-bbbb",
       key: SECRET_KEY_B,
@@ -343,5 +355,31 @@ describe("inventory sync", () => {
     expect(panel.count("inventory-list")).toBe(listsBefore);
     expect(panel.count("inventory-replace")).toBe(replacesBefore + 1);
     expect(repeated).toEqual(grown);
+
+    queueExchange([userRow(installId, "user-c", 3)]);
+    const rescanned = await sync.rescan([workspace, wsB]);
+    expect(panel.count("inventory-replace")).toBe(replacesBefore + 2);
+    expect(panel.count("inventory-list")).toBe(listsBefore + 1);
+    expect(rescanned).toMatchObject({ state: "connected", items: [expect.objectContaining({ name: "user-c" })] });
+    const afterRescan = await sync.list([workspace, wsB]);
+    expect(panel.count("inventory-replace")).toBe(replacesBefore + 2);
+    expect(panel.count("inventory-list")).toBe(listsBefore + 1);
+    expect(afterRescan).toEqual(rescanned);
+  });
+
+  it("returns bad_response without replacing Core inventory when workspace discovery fails", async () => {
+    const { workspace, installId, store, sync } = await fixture();
+    await store.writeCredential(credential(installId, "2099-01-01T00:00:00.000Z"));
+    queueExchange([userRow(installId, "user-a", 1)]);
+    const initial = await sync.list([workspace]);
+    expect(initial).toMatchObject({ state: "connected", items: [expect.objectContaining({ name: "user-a" })] });
+
+    const replacesBefore = panel.count("inventory-replace");
+    const listsBefore = panel.count("inventory-list");
+    expect(await sync.list(null)).toEqual({ state: "connected", scanning: false, items: [], error: "bad_response" });
+    expect(await sync.rescan(null)).toEqual({ state: "connected", scanning: false, items: [], error: "bad_response" });
+    expect(panel.count("inventory-replace")).toBe(replacesBefore);
+    expect(panel.count("inventory-list")).toBe(listsBefore);
+    expect(await sync.list([workspace])).toEqual(initial);
   });
 });

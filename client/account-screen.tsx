@@ -19,6 +19,7 @@ import {
   copyText,
   useToast,
 } from "@getpaseo/plugin/client/ui";
+import { DEFAULT_INSTANCE_ID } from "../shared/constants";
 import type { HarnessId } from "../shared/harness";
 import { installHookRpc, loginRpc, logoutRpc, pollRpc, statusRpc } from "../shared/rpc";
 import { connection, mcp } from "../shared/settings";
@@ -461,7 +462,7 @@ function ConnectedCard({
   const removeAnyway = useCallback(() => void actions.logout(true), [actions]);
   const teams = status.teams.map((team) => (team.role ? `${team.name} · ${team.role}` : team.name));
   const conn = useSettings(connection);
-  const instanceId = conn.status === "ready" ? conn.values.instanceId : "";
+  const instanceId = conn.status === "ready" ? conn.values.instanceId : DEFAULT_INSTANCE_ID;
   const sessionKey = `${status.origin}\0${instanceId}\0${status.account.username}\0${status.account.email ?? ""}\0${status.deviceName}\0${status.expiresAt}`;
   return (
     <View style={styles.card}>
@@ -496,7 +497,7 @@ function ConnectedCard({
       ) : null}
       <McpSwitch styles={styles} />
       {status.setup ? <SetupSummary setup={status.setup} actions={actions} styles={styles} /> : null}
-      <LocalSkillsSection theme={theme} sessionKey={sessionKey} />
+      {conn.status !== "loading" ? <LocalSkillsSection theme={theme} sessionKey={sessionKey} /> : null}
       <TextLink label={t("logout")} onPress={logout} styles={styles} />
     </View>
   );
@@ -701,9 +702,9 @@ export function AccountScreen({ theme, layout }: PluginSurfaceProps) {
   );
 
   const refresh = useCallback(() => {
-    queryClient.removeQueries({ queryKey: ["local-inventory"] });
+    queryClient.removeQueries({ queryKey: ["local-inventory"], type: "inactive" });
     void queryClient.invalidateQueries({ queryKey: STATUS_KEY });
-    void queryClient.invalidateQueries({ queryKey: ["local-inventory"] });
+    void queryClient.resetQueries({ queryKey: ["local-inventory"], type: "active" });
   }, [queryClient]);
 
   const status = query.data;

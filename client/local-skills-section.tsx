@@ -121,7 +121,7 @@ export function LocalSkillsSection({ theme, sessionKey }: { theme: Theme; sessio
         <Text style={styles.muted}>{t("localSkillsEmpty")}</Text>
       ) : null}
       {rows.map((row) => (
-        <View key={`${row.rootKind}/${row.relativePath}`} style={styles.row}>
+        <View key={`${row.inventoryId}:${row.harness}:${row.rootKind}/${row.relativePath}`} style={styles.row}>
           <Text style={styles.text}>{row.name}</Text>
           <Text style={styles.muted}>
             {t("localSkillsTool")}: {row.harnessLabel}

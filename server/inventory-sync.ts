@@ -60,6 +60,7 @@ function workspacesKey(workspaces: readonly string[]): string {
 function acceptRow(row: unknown): LocalInventoryRow | null {
   const parsed = LocalInventoryRow.safeParse(row);
   if (!parsed.success) return null;
+  if (parsed.data.present !== 1) return null;
   if (localSkillNameError(parsed.data.name)) return null;
   if (relativeSkillPathError(parsed.data.relative_path)) return null;
   return parsed.data;
@@ -179,10 +180,11 @@ export function createInventorySync(deps: InventorySyncDeps) {
       );
     },
 
-    list(workspaces: readonly string[]): Promise<LocalInventoryView> {
+    list(workspaces: readonly string[] | null): Promise<LocalInventoryView> {
       return enqueue(async () => {
         const current = adopt(await session());
         if (!current) return cached ?? { state: "signed_out" };
+        if (workspaces === null) return connectedError("bad_response");
         if (
           syncedWorkspacesKey !== null &&
           syncedWorkspacesKey === workspacesKey(workspaces) &&
@@ -195,10 +197,11 @@ export function createInventorySync(deps: InventorySyncDeps) {
       });
     },
 
-    rescan(workspaces: readonly string[]): Promise<LocalInventoryView> {
+    rescan(workspaces: readonly string[] | null): Promise<LocalInventoryView> {
       return enqueue(async () => {
         const current = adopt(await session());
         if (!current) return cached ?? { state: "signed_out" };
+        if (workspaces === null) return connectedError("bad_response");
         return perform(current, workspaces, true);
       });
     },

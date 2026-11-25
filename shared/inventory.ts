@@ -60,12 +60,13 @@ export const LocalInventoryItem = z
   .strict();
 export type LocalInventoryItem = z.infer<typeof LocalInventoryItem>;
 
-export const LocalInventoryRow = LocalInventoryItem.extend({
+export const LocalInventoryRow = z.object({
+  ...LocalInventoryItem.shape,
   inventory_id: z.number(),
   machine_id: z.string(),
   reported_at_ms: z.number().refine((ms) => !Number.isNaN(new Date(ms).getTime())),
   present: z.number(),
-}).strict();
+});
 export type LocalInventoryRow = z.infer<typeof LocalInventoryRow>;
 
 export const InventoryErrorCode = z.enum([

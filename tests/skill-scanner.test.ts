@@ -49,7 +49,9 @@ describe("scanLocalSkills", () => {
     await writeFile(join(home, ".claude", "skills", "no-skill", "README.md"), "not a skill");
     await writeSkill(outside, OUTSIDE);
     await symlink(outside, join(home, ".claude", "skills", "escaped"));
-    await symlink(join("..", "..", "..", "outside-secret"), join(home, ".claude", "skills", "dotdot"));
+    const dotdot = join(home, ".claude", "skills", "dotdot");
+    await symlink(join("..", "..", "..", "..", "outside-secret"), dotdot);
+    expect(await realpath(dotdot)).toBe(await realpath(outside));
     const linked = join(home, ".claude", "skills", "linked-file");
     await mkdir(linked, { recursive: true });
     await writeFile(join(tmp, "external.md"), EXTERNAL);

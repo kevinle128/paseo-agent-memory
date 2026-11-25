@@ -45,7 +45,7 @@ function toMachineSettings(state: SettingsRead): MachineSettings {
   return { origin: parsed.origin, deviceName, instanceId };
 }
 
-async function workspaceDirs(paseo: PluginHandlerContext["paseo"]): Promise<string[]> {
+async function workspaceDirs(paseo: PluginHandlerContext["paseo"]): Promise<string[] | null> {
   try {
     const listed = await paseo.workspaces.list();
     const dirs: string[] = [];
@@ -56,7 +56,7 @@ async function workspaceDirs(paseo: PluginHandlerContext["paseo"]): Promise<stri
     return dirs;
   } catch {
     console.error("inventory workspaces failed");
-    return [];
+    return null;
   }
 }
 

@@ -80,10 +80,12 @@ describe("local skills view", () => {
     const malformed = [
       null,
       undefined,
-      { name: null },
-      { root_kind: undefined },
-      { relative_path: 42 },
-      { content_hash: "short" },
+      { ...row({}), name: null },
+      { ...row({}), name: ".." },
+      { ...row({}), root_kind: undefined },
+      { ...row({}), relative_path: 42 },
+      { ...row({}), content_hash: "short" },
+      { ...row({}), present: 0 },
       { ...row({}), reported_at_ms: Number.NaN },
       { ...row({}), reported_at_ms: 1e20 },
     ];
@@ -130,5 +132,20 @@ describe("local skills view", () => {
     expect(text).toContain("plugin/skills/v1..v2/SKILL.md");
     expect(isSafeInventoryRow(row({ relative_path: "users/alpha/SKILL.md" }))).toBe(false);
     expect(isSafeInventoryRow(row({ relative_path: "../alpha/SKILL.md" }))).toBe(false);
+  });
+
+  it("accepts additive server fields and preserves harness and inventoryId on display rows", () => {
+    const labels = {
+      harness: (id: LocalInventoryRow["harness"]) => `harness.${id}`,
+      source: (source: LocalInventoryRow["source"]) => `inventorySources.${source}`,
+    };
+    const withExtra = { ...row({ inventory_id: 11, harness: "claude", root_kind: "shared_third_party", relative_path: "p/skills/s/SKILL.md" }), extra_field: "v2" };
+    const otherHarness = row({ inventory_id: 12, harness: "codex", root_kind: "shared_third_party", relative_path: "p/skills/s/SKILL.md" });
+    expect(isSafeInventoryRow(withExtra)).toBe(true);
+    const displayed = displayInventoryRows([withExtra, otherHarness], labels);
+    expect(displayed.map((item) => ({ inventoryId: item.inventoryId, harness: item.harness }))).toEqual([
+      { inventoryId: 11, harness: "claude" },
+      { inventoryId: 12, harness: "codex" },
+    ]);
   });
 });

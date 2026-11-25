@@ -5,16 +5,19 @@ import {
   type LocalInventoryRow as InventoryRow,
 } from "../shared/inventory";
 
-/** A row is shown only when the inventory schema and the path allowlist accept it. */
+/** A row is shown only when the inventory schema, present flag, and path allowlist accept it. */
 export function isSafeInventoryRow(row: unknown): row is InventoryRow {
   const parsed = LocalInventoryRow.safeParse(row);
   if (!parsed.success) return false;
+  if (parsed.data.present !== 1) return false;
   if (localSkillNameError(parsed.data.name)) return false;
   if (relativeSkillPathError(parsed.data.relative_path)) return false;
   return true;
 }
 
 export interface InventoryDisplayRow {
+  inventoryId: number;
+  harness: InventoryRow["harness"];
   name: string;
   harnessLabel: string;
   sourceLabel: string;
@@ -34,6 +37,8 @@ export function displayInventoryRows(
 ): InventoryDisplayRow[] {
   const list = Array.isArray(rows) ? rows : [];
   return list.filter(isSafeInventoryRow).map((row) => ({
+    inventoryId: row.inventory_id,
+    harness: row.harness,
     name: row.name,
     harnessLabel: labels.harness(row.harness),
     sourceLabel: labels.source(row.source),

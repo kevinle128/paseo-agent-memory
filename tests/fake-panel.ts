@@ -1,7 +1,14 @@
 import { createServer, type IncomingHttpHeaders, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
-export type FakeRoute = "start" | "token" | "claim" | "logout" | "team-list";
+export type FakeRoute =
+  | "start"
+  | "token"
+  | "claim"
+  | "logout"
+  | "team-list"
+  | "inventory-replace"
+  | "inventory-list";
 
 const PATHS: Record<string, FakeRoute> = {
   "/api/v1/ext/vtc/device/start": "start",
@@ -9,6 +16,8 @@ const PATHS: Record<string, FakeRoute> = {
   "/api/v1/ext/vtc/device/claim": "claim",
   "/api/v1/ext/vtc/device/logout": "logout",
   "/api/v1/meta/team/list": "team-list",
+  "/api/v1/skill/local-inventory/replace": "inventory-replace",
+  "/api/v1/skill/local-inventory/list": "inventory-list",
 };
 
 export interface Scripted {
@@ -44,6 +53,8 @@ export async function startFakePanel(): Promise<FakePanel> {
     claim: [],
     logout: [],
     "team-list": [],
+    "inventory-replace": [],
+    "inventory-list": [],
   };
   const requests: RecordedRequest[] = [];
   const sockets = new Set<import("node:net").Socket>();

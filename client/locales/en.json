@@ -67,6 +67,23 @@
   "mcpSwitch": "Turn on the agent-memory MCP",
   "mcpOn": "Claude Code, Codex and omp agents opened in Paseo get the agent-memory MCP. A change applies when an agent opens. Antigravity gets it from its own config file when the key is issued, and this switch does not change that.",
   "mcpOff": "The agent-memory MCP is off.",
+  "localSkillsTitle": "Local skills",
+  "localSkillsEmpty": "No skill folders were found on this machine.",
+  "localSkillsRescan": "Rescan",
+  "localSkillsScanning": "Scanning skill folders...",
+  "localSkillsTool": "Tool",
+  "localSkillsSource": "Source",
+  "inventorySources": {
+    "user": "User",
+    "project": "Project",
+    "third_party_plugin": "Third-party plugin"
+  },
+  "inventoryErrors": {
+    "auth_failed": "The connection to Agent-Memory failed. Log in again.",
+    "network": "Could not reach Agent-Memory.",
+    "server_unavailable": "Agent-Memory is not available now.",
+    "bad_response": "Agent-Memory sent an unexpected answer."
+  },
   "mcpInvalid": "The agent-memory MCP is off because its saved setting cannot be read. Reset it to turn it on again.",
   "harness": {
     "claude": "Claude Code",

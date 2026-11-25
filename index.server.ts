@@ -1,12 +1,22 @@
 import { hostname } from "node:os";
-import type { PluginServerContext, PluginSettingsState } from "@getpaseo/plugin/server";
+import type { PluginHandlerContext, PluginServerContext, PluginSettingsState } from "@getpaseo/plugin/server";
 import { parseBaseUrl } from "./shared/base-url";
 import { PLACEHOLDER_ORIGIN } from "./shared/constants";
-import { installHookRpc, logoutRpc, loginRpc, pollRpc, statusRpc } from "./shared/rpc";
+import {
+  installHookRpc,
+  inventoryListRpc,
+  inventoryRescanRpc,
+  logoutRpc,
+  loginRpc,
+  pollRpc,
+  statusRpc,
+} from "./shared/rpc";
 import { connection, mcp } from "./shared/settings";
 import { mcpEnabled } from "./shared/view";
 import { ensureDataDir, resolveDataDir } from "./server/data-dir";
 import { createDeviceApi } from "./server/device-api";
+import { createInventoryApi } from "./server/inventory-api";
+import { createInventorySync } from "./server/inventory-sync";
 import { createLoginMachine, type MachineSettings } from "./server/login-machine";
 import { createHarnessSetup } from "./server/harness-setup";
 import { detectHarnesses, resolvePaths } from "./server/harness-paths";
@@ -35,6 +45,21 @@ function toMachineSettings(state: SettingsRead): MachineSettings {
   return { origin: parsed.origin, deviceName, instanceId };
 }
 
+async function workspaceDirs(paseo: PluginHandlerContext["paseo"]): Promise<string[] | null> {
+  try {
+    const listed = await paseo.workspaces.list();
+    const dirs: string[] = [];
+    for (const entry of listed.entries) {
+      const dir = entry.workspaceDirectory ?? entry.projectRootPath;
+      if (typeof dir === "string" && dir.length > 0) dirs.push(dir);
+    }
+    return dirs;
+  } catch {
+    console.error("inventory workspaces failed");
+    return null;
+  }
+}
+
 export default function contribute(server: PluginServerContext) {
   const settings = server.registerSettings(connection);
   const mcpSettings = server.registerSettings(mcp);
@@ -44,6 +69,14 @@ export default function contribute(server: PluginServerContext) {
 
   const store = createStore(dir);
   const paths = resolvePaths();
+  const readSettings = async () => toMachineSettings(await settings.read());
+  const inventory = createInventorySync({
+    store,
+    readSettings,
+    api: createInventoryApi({ signal: lifetime.signal }),
+    paths,
+    env: process.env,
+  });
   const harness = createHarnessSetup({
     store,
     paths,
@@ -56,7 +89,10 @@ export default function contribute(server: PluginServerContext) {
     store,
     harness,
     api: createDeviceApi({ signal: lifetime.signal }),
-    readSettings: async () => toMachineSettings(await settings.read()),
+    readSettings,
+    // Login completion is not a handler context, so paseo.workspaces is unavailable.
+    // The scan reports user roots only until the Account screen supplies directories.
+    onConnected: () => inventory.backgroundScan(),
     now: Date.now,
     setTimer: (fn, ms) => {
       const timer = setTimeout(fn, ms);
@@ -71,6 +107,13 @@ export default function contribute(server: PluginServerContext) {
   const initError = ensureDataDir(dir)
     .then(() => harness.init())
     .then(() => machine.init())
+    .then(() => {
+      // A folder scan must not decide whether the plugin becomes ready.
+      // PluginServerContext has no paseo handle, so this startup scan passes
+      // workspaces: []. Project skills already on Core stay absent until
+      // inventoryListRpc calls context.paseo.workspaces.list().
+      void inventory.backgroundScan();
+    })
     .then(
       () => null,
       (error: unknown) => {
@@ -120,6 +163,14 @@ export default function contribute(server: PluginServerContext) {
   server.handle(installHookRpc, async ({ id }) => {
     await ready();
     return machine.installHook(id);
+  });
+  server.handle(inventoryListRpc, async (_input, context) => {
+    await ready();
+    return inventory.list(await workspaceDirs(context.paseo));
+  });
+  server.handle(inventoryRescanRpc, async (_input, context) => {
+    await ready();
+    return inventory.rescan(await workspaceDirs(context.paseo));
   });
 
   return () => {

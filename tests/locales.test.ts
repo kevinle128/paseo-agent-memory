@@ -59,6 +59,12 @@ describe("locale files", () => {
     for (const result of RemovalResult.options) expect(english.has(`removalResults.${result}`), result).toBe(true);
   });
 
+  it("cover every inventory source and error the local skills screen can show", async () => {
+    const { InventorySource, InventoryErrorCode } = await import("../shared/inventory");
+    for (const source of InventorySource.options) expect(english.has(`inventorySources.${source}`), source).toBe(true);
+    for (const code of InventoryErrorCode.options) expect(english.has(`inventoryErrors.${code}`), code).toBe(true);
+  });
+
   it("are accepted by the plugin translation runtime", async () => {
     // The client entry may need react-native; skip only this assertion when it cannot load in Node.
     let define: typeof import("@getpaseo/plugin/client").defineTranslations;
